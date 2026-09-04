@@ -1,6 +1,6 @@
 """Deploy VectorLoom's complete web UI to Modal.
 
-Run:  pip install modal && modal deploy deploy/modal.py
+Run:  pip install modal && modal deploy deploy/modal_deploy.py
 The first deployment downloads about 20 GB of public StarVector checkpoints
 into the persistent `vectorloom-models` volume before the site becomes ready.
 """

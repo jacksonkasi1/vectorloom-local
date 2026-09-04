@@ -15,7 +15,7 @@ Install and authenticate the CLI, then deploy from the repository root:
 ```sh
 python -m pip install modal
 modal setup
-modal deploy deploy/modal.py
+modal deploy deploy/modal_deploy.py
 ```
 
 The command prints the public `modal.run` URL. The named `vectorloom-models`
