@@ -1,6 +1,17 @@
-# VectorLoom Local
+# VectorLoom
 
-Local-only image vectorization for Apple Silicon. The UI is deliberately simple: upload a PNG, JPG, or WebP; VectorLoom traces it automatically; preview and download the SVG.
+Image vectorization for Apple Silicon and hosted NVIDIA GPUs. The UI is deliberately simple: upload a PNG, JPG, or WebP; choose StarVector 1B or 8B; preview and download the SVG.
+
+## Hosted GPU deployment
+
+The included Docker image compiles Candle with CUDA and serves both the browser UI and HTTP API. It automatically installs both model checkpoints into `VECTOR_MODEL_DIR` (default `/models`) before accepting traffic. Mount persistent storage there: the two models need about 20 GB together.
+
+```sh
+docker build -t vectorloom:cuda .
+docker run --gpus all -p 3000:3000 -v vectorloom-models:/models vectorloom:cuda
+```
+
+See [deploy/README.md](deploy/README.md) for Modal deployment. The image is designed for an A100 80 GB so either model can be selected safely.
 
 ## Install the macOS app
 
@@ -32,7 +43,7 @@ The model panel downloads official, revision-pinned Hugging Face checkpoints dir
 
 Selecting a model is remembered across restarts. When there is no saved choice, an already-downloaded 1B checkpoint is preferred over an unavailable 8B checkpoint. Selecting a downloaded model makes uploads use real in-process Candle inference; the loaded model is cached between requests.
 
-All files are processed in memory by the process bound to `127.0.0.1`; no image or SVG is persisted or transmitted.
+Images and generated SVGs are processed in memory and are not persisted. Local builds bind to `127.0.0.1` by default; hosted containers set `VECTOR_BIND=0.0.0.0`.
 
 ## Current inference policy
 

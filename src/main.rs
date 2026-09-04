@@ -1,17 +1,13 @@
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Multipart, Path, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::StatusCode,
     response::IntoResponse,
     routing::{delete, get, post},
 };
 use image::GenericImageView;
 use serde::{Deserialize, Serialize};
-use std::{
-    path::PathBuf,
-    sync::{Arc, RwLock},
-    time::Instant,
-};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
 use tracing::info;
 use vectorloom_local::{
@@ -26,7 +22,6 @@ use vectorloom_local::{
 struct AppState {
     models: Arc<ModelManager>,
     starvector: Arc<StarVectorRuntime>,
-    last_svg: Arc<RwLock<Option<String>>>,
 }
 
 #[derive(Serialize)]
@@ -54,32 +49,52 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+    let model_manager = Arc::new(ModelManager::new(model_root()));
+    if std::env::args().any(|argument| argument == "--bootstrap-models") {
+        info!("ensuring both StarVector checkpoints are installed");
+        model_manager
+            .bootstrap_all()
+            .await
+            .expect("bootstrap StarVector checkpoints");
+        return;
+    }
+    if matches!(std::env::var("VECTOR_AUTO_DOWNLOAD").as_deref(), Ok("all")) {
+        let bootstrap_models = Arc::clone(&model_manager);
+        tokio::spawn(async move {
+            if let Err(error) = bootstrap_models.bootstrap_all().await {
+                tracing::error!(%error, "automatic model bootstrap failed");
+            }
+        });
+    }
     let state = AppState {
-        models: Arc::new(ModelManager::new(model_root())),
+        models: model_manager,
         starvector: Arc::new(StarVectorRuntime::new()),
-        last_svg: Arc::new(RwLock::new(None)),
     };
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/vectorize", post(vectorize_upload))
-        .route("/api/download", get(download_svg))
         .route("/api/models", get(models))
-        .route("/api/models/select", post(select_model))
-        .route("/api/models/{model}/download", post(download_model))
-        .route("/api/models/{model}", delete(delete_model))
         .fallback_service(ServeDir::new("web").append_index_html_on_directories(true))
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
         .layer(TraceLayer::new_for_http())
-        .layer(CorsLayer::very_permissive())
-        .with_state(state);
+        .layer(CorsLayer::very_permissive());
+    let app = if std::env::var_os("VECTOR_ENABLE_MODEL_ADMIN").is_some() {
+        app.route("/api/models/select", post(select_model))
+            .route("/api/models/{model}/download", post(download_model))
+            .route("/api/models/{model}", delete(delete_model))
+    } else {
+        app
+    }
+    .with_state(state);
     let port = std::env::var("VECTOR_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(3000);
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+    let bind_address = std::env::var("VECTOR_BIND").unwrap_or_else(|_| "127.0.0.1".to_owned());
+    let listener = tokio::net::TcpListener::bind((bind_address.as_str(), port))
         .await
-        .expect("bind local server");
-    info!("VectorLoom is local-only at http://127.0.0.1:{port}");
+        .expect("bind server");
+    info!("VectorLoom listening at http://{bind_address}:{port}");
     axum::serve(listener, app).await.expect("serve local app");
 }
 
@@ -139,20 +154,33 @@ async fn vectorize_upload(
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let processing_started = Instant::now();
-    let field = multipart
-        .next_field()
-        .await
-        .map_err(api_error)?
-        .ok_or_else(|| invalid("Select a PNG, JPEG, or WebP image."))?;
-    let content_type = field.content_type().unwrap_or("").to_owned();
+    let mut uploaded_image = None;
+    let mut requested_model = None;
+    while let Some(field) = multipart.next_field().await.map_err(api_error)? {
+        match field.name() {
+            Some("image") => {
+                uploaded_image = Some((
+                    field.content_type().unwrap_or("").to_owned(),
+                    field.bytes().await.map_err(api_error)?,
+                ))
+            }
+            Some("model") => requested_model = Some(field.text().await.map_err(api_error)?),
+            _ => {}
+        }
+    }
+    let (content_type, bytes) =
+        uploaded_image.ok_or_else(|| invalid("Select a PNG, JPEG, or WebP image."))?;
     if !matches!(
         content_type.as_str(),
         "image/png" | "image/jpeg" | "image/webp"
     ) {
         return Err(invalid("Only PNG, JPEG, and WebP files are accepted."));
     }
-    let bytes = field.bytes().await.map_err(api_error)?;
-    let kind = state.models.selected();
+    let kind = requested_model
+        .as_deref()
+        .map(parse_model)
+        .transpose()?
+        .unwrap_or_else(|| state.models.selected());
     let installed = state.models.is_installed(kind).await;
     let model_dir = state.models.model_dir(kind);
     let runtime = Arc::clone(&state.starvector);
@@ -193,30 +221,7 @@ async fn vectorize_upload(
     .map_err(api_error)?
     .map_err(api_error)?;
     result.elapsed_ms = processing_started.elapsed().as_millis();
-    *state.last_svg.write().expect("SVG download lock") = Some(result.svg.clone());
     Ok(Json(result))
-}
-
-async fn download_svg(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let svg = state
-        .last_svg
-        .read()
-        .expect("SVG download lock")
-        .clone()
-        .ok_or_else(|| invalid("Upload an image and wait for processing to finish first."))?;
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("image/svg+xml; charset=utf-8"),
-    );
-    headers.insert(
-        header::CONTENT_DISPOSITION,
-        HeaderValue::from_static("attachment; filename=\"vectorloom.svg\""),
-    );
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    Ok((headers, svg))
 }
 
 fn parse_model(value: &str) -> Result<ModelKind, (StatusCode, Json<ApiError>)> {

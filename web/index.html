@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>VectorLoom — local image vectorizer</title>
+    <title>VectorLoom — image vectorizer</title>
     <link rel="stylesheet" href="/styles.css?v=2" />
   </head>
   <body>
@@ -26,7 +26,7 @@
           <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
           <span class="drop-icon">↗</span>
           <strong>Choose an image</strong>
-          <small>PNG, JPG, or WebP · processed only on this Mac</small>
+          <small>PNG, JPG, or WebP · converted securely and never stored</small>
         </label>
         <div id="progress" class="progress hidden"><span></span><p id="progress-text">Building vectors… 0h 0m 0s</p></div>
         <section id="result" class="result hidden">
@@ -38,7 +38,7 @@
         </section>
         <p id="error" class="error hidden" role="alert"></p>
       </section>
-      <footer><span id="runtime">Checking local runtime…</span><span>No upload. No account. No cloud.</span></footer>
+      <footer><span id="runtime">Checking inference runtime…</span><span>No account required.</span></footer>
     </main>
     <script src="/app.js?v=2"></script>
   </body>

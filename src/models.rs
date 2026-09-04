@@ -388,6 +388,18 @@ impl ModelManager {
         Ok(())
     }
 
+    /// Download every missing checkpoint before accepting public traffic.
+    /// Existing complete files are retained, so this is safe to run on every
+    /// container start when `VECTOR_MODEL_DIR` points to persistent storage.
+    pub async fn bootstrap_all(&self) -> Result<()> {
+        for kind in [ModelKind::OneB, ModelKind::EightB] {
+            if !self.is_installed(kind).await {
+                self.download(kind).await?;
+            }
+        }
+        Ok(())
+    }
+
     async fn download(&self, kind: ModelKind) -> Result<()> {
         let model_dir = self.model_dir(kind);
         fs::create_dir_all(&model_dir)
@@ -517,6 +529,8 @@ fn is_installed_sync(root: &Path, kind: ModelKind) -> bool {
 pub fn runtime_device_label() -> &'static str {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "Metal · BF16"
+    } else if cfg!(feature = "cuda") {
+        "NVIDIA CUDA · GPU"
     } else {
         "CPU · F32"
     }

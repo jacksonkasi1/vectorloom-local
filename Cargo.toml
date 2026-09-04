@@ -5,6 +5,12 @@ edition = "2024"
 license = "Apache-2.0"
 description = "Local-only Apple Silicon raster-to-SVG web application"
 
+[features]
+default = ["accelerate", "metal"]
+accelerate = ["starvector-rs/accelerate"]
+metal = ["starvector-rs/metal"]
+cuda = ["starvector-rs/cuda"]
+
 [dependencies]
 anyhow = "1.0"
 axum = { version = "0.8", features = ["multipart"] }
@@ -14,7 +20,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 roxmltree = "0.21"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-starvector-rs = { git = "https://github.com/jacksonkasi1/starvector-rs.git", rev = "3467c66", features = ["accelerate", "metal"] }
+starvector-rs = { git = "https://github.com/jacksonkasi1/starvector-rs.git", rev = "3467c66", default-features = false }
 tempfile = "3.23"
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "net"] }
 tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }

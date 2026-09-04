@@ -14,6 +14,7 @@ const hardwareNote = document.querySelector('#hardware-note');
 const resultWarning = document.querySelector('#result-warning');
 
 let modelPoll;
+let selectedModel;
 loadModels();
 
 input.addEventListener('change', () => input.files[0] && process(input.files[0]));
@@ -32,7 +33,9 @@ async function process(file) {
   const elapsedTimer = setInterval(() => {
     progressText.textContent = `Building vectors… ${formatDuration(Date.now() - startedAt)}`;
   }, 1000);
-  const form = new FormData(); form.append('image', file);
+  const form = new FormData();
+  form.append('image', file);
+  form.append('model', selectedModel || '8b');
   try {
     const response = await fetch('/api/vectorize', { method: 'POST', body: form });
     const payload = await response.json();
@@ -41,7 +44,7 @@ async function process(file) {
     const url = URL.createObjectURL(blob);
     if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
     preview.src = url;
-    download.href = `/api/download?t=${Date.now()}`;
+    download.href = url;
     meta.textContent = `${payload.width} × ${payload.height} · ${formatDuration(payload.elapsed_ms)} · ${payload.engine}`;
     resultWarning.textContent = payload.warning || '';
     result.classList.remove('hidden');
@@ -69,57 +72,31 @@ function renderModels(catalog) {
   device.textContent = catalog.runtime_device;
   hardwareNote.textContent = catalog.hardware_note;
   const selected = catalog.models.find(model => model.selected);
+  selectedModel ||= selected?.id || '8b';
   runtime.textContent = selected?.installed
     ? `${selected.label} · ${catalog.runtime_device}`
     : `${selected?.label || 'Model'} selected · automatic tracer available`;
   models.replaceChildren(...catalog.models.map(model => {
     const card = document.createElement('article');
-    card.className = `model-card${model.selected ? ' selected' : ''}`;
+    const isSelected = model.id === selectedModel;
+    card.className = `model-card${isSelected ? ' selected' : ''}`;
     const percent = Math.min(100, Math.round((model.downloaded_bytes / model.total_bytes) * 100));
     card.innerHTML = `
       <div class="model-name"><strong>${model.label}</strong><span>${model.id === '8b' ? 'Best quality' : 'Faster'}</span></div>
       <p>${formatBytes(model.total_bytes)} checkpoint · ${model.installed ? 'Ready locally' : model.phase === 'downloading' ? `${percent}% downloaded` : 'Not downloaded'}</p>
       <div class="model-progress"><span style="width:${model.installed ? 100 : percent}%"></span></div>
       <div class="model-actions">
-        <button data-select="${model.id}" ${model.selected ? 'disabled' : ''}>${model.selected ? 'Selected' : 'Use model'}</button>
-        ${model.installed
-          ? `<button class="secondary danger" data-delete="${model.id}">Delete model</button>`
-          : `<button class="secondary" data-download="${model.id}" ${model.phase === 'downloading' ? 'disabled' : ''}>${model.phase === 'downloading' ? 'Downloading…' : 'Download'}</button>`}
+        <button data-select="${model.id}" ${isSelected || !model.installed ? 'disabled' : ''}>${isSelected ? 'Selected' : model.installed ? 'Use model' : 'Preparing…'}</button>
       </div>
       ${model.message ? `<small>${escapeHtml(model.message)}</small>` : ''}`;
     return card;
   }));
   models.querySelectorAll('[data-select]').forEach(button => button.addEventListener('click', () => selectModel(button.dataset.select)));
-  models.querySelectorAll('[data-download]').forEach(button => button.addEventListener('click', () => downloadModel(button.dataset.download)));
-  models.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', () => deleteModel(button.dataset.delete)));
 }
 
-async function selectModel(model) {
-  const response = await fetch('/api/models/select', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model })
-  });
-  if (!response.ok) throw new Error(`Could not select StarVector ${model.toUpperCase()}.`);
-  await loadModels();
-}
-
-async function downloadModel(model) {
-  const response = await fetch(`/api/models/${model}/download`, { method: 'POST' });
-  if (!response.ok) {
-    const payload = await response.json();
-    error.textContent = payload.error; error.classList.remove('hidden');
-  }
-  await loadModels();
-}
-
-async function deleteModel(model) {
-  if (!window.confirm(`Delete StarVector ${model.toUpperCase()} from this Mac? You can download it again later.`)) return;
-  const response = await fetch(`/api/models/${model}`, { method: 'DELETE' });
-  if (!response.ok) {
-    const payload = await response.json();
-    error.textContent = payload.error || 'Could not delete the model.';
-    error.classList.remove('hidden');
-  }
-  await loadModels();
+function selectModel(model) {
+  selectedModel = model;
+  loadModels();
 }
 
 function formatBytes(bytes) {

@@ -50,13 +50,15 @@ impl StarVectorRuntime {
         if loaded.as_ref().map(|value| value.kind) != Some(kind) {
             let runtime_device = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
                 RuntimeDevice::Metal(0)
+            } else if cfg!(feature = "cuda") {
+                RuntimeDevice::Cuda(0)
             } else {
                 RuntimeDevice::Cpu
             };
-            let device_name = if matches!(runtime_device, RuntimeDevice::Metal(_)) {
-                "Metal/BF16"
-            } else {
-                "CPU/F32"
+            let device_name = match runtime_device {
+                RuntimeDevice::Metal(_) => "Metal/BF16",
+                RuntimeDevice::Cuda(_) => "NVIDIA CUDA",
+                RuntimeDevice::Cpu => "CPU/F32",
             };
             let device = runtime_device
                 .to_candle_device()
