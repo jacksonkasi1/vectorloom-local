@@ -342,7 +342,9 @@ impl ModelManager {
         ModelCatalog {
             models,
             runtime_device: runtime_device_label(),
-            hardware_note: if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            hardware_note: if cfg!(feature = "cuda") {
+                "NVIDIA CUDA detected. The hosted service defaults to StarVector 8B on a high-memory GPU."
+            } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
                 "Apple Silicon detected. Metal/BF16 is preferred with CPU fallback."
             } else {
                 "This host is not Apple Silicon; StarVector uses CPU and 8B may exceed practical memory or time limits."

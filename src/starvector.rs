@@ -115,11 +115,10 @@ impl StarVectorRuntime {
 
 fn validate_svg(raw: String) -> Result<String> {
     let start = raw.find("<svg").context("model output has no SVG root")?;
-    let svg = if let Some(close) = raw.rfind("</svg>") {
-        raw[start..close + "</svg>".len()].trim().to_owned()
-    } else {
-        recover_incomplete_svg(&raw[start..])?
-    };
+    let close = raw
+        .rfind("</svg>")
+        .context("model output is incomplete (missing </svg>)")?;
+    let svg = raw[start..close + "</svg>".len()].trim().to_owned();
     let lower = svg.to_ascii_lowercase();
     for forbidden in [
         "<script",
@@ -139,55 +138,6 @@ fn validate_svg(raw: String) -> Result<String> {
         "model output root is not SVG"
     );
     Ok(svg)
-}
-
-/// StarVector occasionally reaches its generation limit after finishing vector
-/// elements but before writing the final closing tags. Retain that useful model
-/// output by discarding only a partial final tag and balancing open XML tags.
-fn recover_incomplete_svg(raw: &str) -> Result<String> {
-    let end = raw
-        .rfind('>')
-        .context("model output has no complete SVG element")?;
-    let complete = &raw[..=end];
-    let mut open_tags = Vec::new();
-    let mut offset = 0;
-
-    while let Some(relative_start) = complete[offset..].find('<') {
-        let start = offset + relative_start;
-        let Some(relative_end) = complete[start..].find('>') else {
-            break;
-        };
-        let end = start + relative_end;
-        let tag = complete[start + 1..end].trim();
-        offset = end + 1;
-
-        if tag.is_empty() || tag.starts_with('!') || tag.starts_with('?') || tag.ends_with('/') {
-            continue;
-        }
-        if let Some(name) = tag.strip_prefix('/') {
-            let name = name.split_whitespace().next().unwrap_or_default();
-            if open_tags.last().is_some_and(|open| open == name) {
-                open_tags.pop();
-            }
-            continue;
-        }
-        let name = tag.split_whitespace().next().unwrap_or_default();
-        if !name.is_empty() {
-            open_tags.push(name.to_owned());
-        }
-    }
-
-    anyhow::ensure!(
-        open_tags.first().is_some_and(|tag| tag == "svg"),
-        "model output has no open SVG root"
-    );
-    let mut recovered = complete.to_owned();
-    while let Some(tag) = open_tags.pop() {
-        recovered.push_str("</");
-        recovered.push_str(&tag);
-        recovered.push('>');
-    }
-    Ok(recovered)
 }
 
 #[cfg(test)]
@@ -212,11 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn closes_a_complete_but_unterminated_model_svg() {
-        let svg = validate_svg(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\"><g><path d=\"M0 0\"/>".to_owned(),
-        )
-        .unwrap();
-        assert!(svg.ends_with("</g></svg>"));
+    fn rejects_incomplete_model_svg() {
+        assert!(validate_svg("<svg><path d=\"M0 0\"/>".to_owned()).is_err());
     }
 }

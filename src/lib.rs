@@ -40,7 +40,9 @@ pub fn runtime_status() -> RuntimeStatus {
     RuntimeStatus {
         requested_model,
         device,
-        precision: if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        precision: if cfg!(feature = "cuda") {
+            "FP16"
+        } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
             "BF16"
         } else {
             "F32"

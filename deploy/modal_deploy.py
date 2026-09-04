@@ -29,4 +29,5 @@ def vectorloom():
     # Serve the UI immediately; the Rust service downloads missing checkpoints
     # in the background and exposes their live progress through /api/models.
     os.environ["VECTOR_AUTO_DOWNLOAD"] = "all"
+    os.environ["VECTOR_MODEL"] = "8b"
     subprocess.Popen(["/app/vectorloom-local"])
