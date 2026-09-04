@@ -32,6 +32,13 @@ impl StarVectorRuntime {
         }
     }
 
+    pub fn unload(&self, kind: ModelKind) {
+        let mut loaded = self.loaded.lock().expect("StarVector runtime lock");
+        if loaded.as_ref().map(|value| value.kind) == Some(kind) {
+            *loaded = None;
+        }
+    }
+
     pub fn generate(
         &self,
         kind: ModelKind,

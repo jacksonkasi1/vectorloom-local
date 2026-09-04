@@ -3,7 +3,7 @@ use axum::{
     extract::{DefaultBodyLimit, Multipart, Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use image::GenericImageView;
 use serde::{Deserialize, Serialize};
@@ -66,15 +66,20 @@ async fn main() {
         .route("/api/models", get(models))
         .route("/api/models/select", post(select_model))
         .route("/api/models/{model}/download", post(download_model))
+        .route("/api/models/{model}", delete(delete_model))
         .fallback_service(ServeDir::new("web").append_index_html_on_directories(true))
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::very_permissive())
         .with_state(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+    let port = std::env::var("VECTOR_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(3000);
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
         .await
         .expect("bind local server");
-    info!("VectorLoom is local-only at http://127.0.0.1:3000");
+    info!("VectorLoom is local-only at http://127.0.0.1:{port}");
     axum::serve(listener, app).await.expect("serve local app");
 }
 
@@ -113,6 +118,20 @@ async fn download_model(
         .start_download(kind)
         .map_err(|error| conflict(&error.to_string()))?;
     Ok((StatusCode::ACCEPTED, Json(Accepted { accepted: true })))
+}
+
+async fn delete_model(
+    State(state): State<AppState>,
+    Path(model): Path<String>,
+) -> Result<Json<ModelCatalog>, (StatusCode, Json<ApiError>)> {
+    let kind = parse_model(&model)?;
+    state.starvector.unload(kind);
+    state
+        .models
+        .delete(kind)
+        .await
+        .map_err(|error| conflict(&error.to_string()))?;
+    Ok(Json(state.models.catalog().await))
 }
 
 async fn vectorize_upload(

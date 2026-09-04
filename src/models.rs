@@ -4,6 +4,7 @@ use reqwest::{Client, StatusCode, header::RANGE};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    io::ErrorKind,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
@@ -281,6 +282,35 @@ impl ModelManager {
         true
     }
 
+    pub async fn delete(&self, kind: ModelKind) -> Result<()> {
+        if matches!(
+            self.progress
+                .read()
+                .expect("download progress lock")
+                .get(&kind)
+                .map(|progress| &progress.phase),
+            Some(DownloadPhase::Downloading)
+        ) {
+            bail!("{} is still downloading", kind.label());
+        }
+        match fs::remove_dir_all(self.model_dir(kind)).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("delete local model checkpoint"),
+        }
+        self.progress
+            .write()
+            .expect("download progress lock")
+            .remove(&kind);
+        if self.selected() == kind {
+            self.select(match kind {
+                ModelKind::OneB => ModelKind::EightB,
+                ModelKind::EightB => ModelKind::OneB,
+            });
+        }
+        Ok(())
+    }
+
     pub async fn catalog(&self) -> ModelCatalog {
         let selected = self.selected();
         let snapshot = self
@@ -494,7 +524,7 @@ pub fn runtime_device_label() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::ModelKind;
+    use super::{ModelKind, ModelManager};
 
     #[test]
     fn model_ids_match_the_api_contract() {
@@ -506,5 +536,22 @@ mod tests {
             serde_json::from_str::<ModelKind>("\"8b\"").unwrap(),
             ModelKind::EightB
         );
+    }
+
+    #[tokio::test]
+    async fn deleting_a_model_removes_only_its_checkpoint_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = ModelManager::new(root.path());
+        manager.select(ModelKind::OneB);
+        let model_dir = manager.model_dir(ModelKind::OneB);
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("checkpoint-marker"), b"local model").unwrap();
+        std::fs::write(root.path().join("keep-me"), b"unrelated").unwrap();
+
+        manager.delete(ModelKind::OneB).await.unwrap();
+
+        assert!(!model_dir.exists());
+        assert!(root.path().join("keep-me").exists());
+        assert_eq!(manager.selected(), ModelKind::EightB);
     }
 }

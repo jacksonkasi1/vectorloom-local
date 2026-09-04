@@ -23,6 +23,7 @@ h1 { font: 650 clamp(3rem, 9vw, 6.7rem)/.87 Fraunces, serif; letter-spacing: -.0
 .model-actions { display: flex; gap: .5rem; margin-top: .8rem; }
 .model-actions button { border: 0; background: #18221d; color: white; padding: .55rem .7rem; font: .62rem 'DM Mono'; cursor: pointer; }
 .model-actions button.secondary { background: transparent; color: #18221d; border: 1px solid #9ca79d; }.model-actions button:disabled { opacity: .48; cursor: default; }
+.model-actions button.danger { color: #9d2930; border-color: #caa7a9; }
 .hardware-note { margin: .8rem 0 0; }
 .dropzone { min-height: 250px; border: 1.5px dashed #8b998a; background: #faf9f3aa; display: grid; place-content: center; text-align: center; gap: .65rem; cursor: pointer; transition: .2s ease; }
 .dropzone:hover, .dropzone.over { background: #dff0da; border-color: #528651; transform: translateY(-2px); }

@@ -82,13 +82,16 @@ function renderModels(catalog) {
       <div class="model-progress"><span style="width:${model.installed ? 100 : percent}%"></span></div>
       <div class="model-actions">
         <button data-select="${model.id}" ${model.selected ? 'disabled' : ''}>${model.selected ? 'Selected' : 'Use model'}</button>
-        ${model.installed ? '' : `<button class="secondary" data-download="${model.id}" ${model.phase === 'downloading' ? 'disabled' : ''}>${model.phase === 'downloading' ? 'Downloading…' : 'Download'}</button>`}
+        ${model.installed
+          ? `<button class="secondary danger" data-delete="${model.id}">Delete model</button>`
+          : `<button class="secondary" data-download="${model.id}" ${model.phase === 'downloading' ? 'disabled' : ''}>${model.phase === 'downloading' ? 'Downloading…' : 'Download'}</button>`}
       </div>
       ${model.message ? `<small>${escapeHtml(model.message)}</small>` : ''}`;
     return card;
   }));
   models.querySelectorAll('[data-select]').forEach(button => button.addEventListener('click', () => selectModel(button.dataset.select)));
   models.querySelectorAll('[data-download]').forEach(button => button.addEventListener('click', () => downloadModel(button.dataset.download)));
+  models.querySelectorAll('[data-delete]').forEach(button => button.addEventListener('click', () => deleteModel(button.dataset.delete)));
 }
 
 async function selectModel(model) {
@@ -104,6 +107,17 @@ async function downloadModel(model) {
   if (!response.ok) {
     const payload = await response.json();
     error.textContent = payload.error; error.classList.remove('hidden');
+  }
+  await loadModels();
+}
+
+async function deleteModel(model) {
+  if (!window.confirm(`Delete StarVector ${model.toUpperCase()} from this Mac? You can download it again later.`)) return;
+  const response = await fetch(`/api/models/${model}`, { method: 'DELETE' });
+  if (!response.ok) {
+    const payload = await response.json();
+    error.textContent = payload.error || 'Could not delete the model.';
+    error.classList.remove('hidden');
   }
   await loadModels();
 }
