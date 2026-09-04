@@ -105,6 +105,9 @@ impl StarVectorRuntime {
             .model
             .generate_svg(temp.path(), &generation)
             .context("generate SVG")?;
+        if let Ok(path) = std::env::var("VECTOR_DEBUG_RAW_OUTPUT") {
+            let _ = std::fs::write(path, &output.svg);
+        }
         Ok(StarVectorResult {
             // 8B reliably draws the whole image but can consume its context
             // before emitting closing XML tags. Recover only that known model

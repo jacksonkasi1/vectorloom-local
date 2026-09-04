@@ -48,6 +48,7 @@ def quality_probe():
     """Run the supplied badge image entirely in Modal and preserve its response."""
     os.environ["VECTOR_AUTO_DOWNLOAD"] = "all"
     os.environ["VECTOR_MODEL"] = "8b"
+    os.environ["VECTOR_DEBUG_RAW_OUTPUT"] = "/models/probe/raw-starvector-output.txt"
     service = subprocess.Popen(["/app/vectorloom-local"])
     try:
         for _ in range(60):
