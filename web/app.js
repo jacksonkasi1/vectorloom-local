@@ -37,9 +37,10 @@ async function process(file) {
   form.append('image', file);
   form.append('model', selectedModel || '8b');
   try {
-    const response = await fetch('/api/vectorize', { method: 'POST', body: form });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'Vectorization failed.');
+    const response = await fetch('/api/vectorize/jobs', { method: 'POST', body: form });
+    const accepted = await response.json();
+    if (!response.ok) throw new Error(accepted.error || 'Vectorization failed.');
+    const payload = await waitForVectorJob(accepted.job_id);
     const blob = new Blob([payload.svg], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
     if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
@@ -53,6 +54,17 @@ async function process(file) {
   } finally {
     clearInterval(elapsedTimer);
     progress.classList.add('hidden');
+  }
+}
+
+async function waitForVectorJob(jobId) {
+  while (true) {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    const response = await fetch(`/api/vectorize/jobs/${encodeURIComponent(jobId)}`);
+    const job = await response.json();
+    if (!response.ok) throw new Error(job.error || 'Vectorization job failed.');
+    if (job.state === 'complete') return job.result;
+    if (job.state === 'failed') throw new Error(job.error || 'Vectorization job failed.');
   }
 }
 

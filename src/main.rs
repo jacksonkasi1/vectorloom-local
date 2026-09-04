@@ -7,7 +7,15 @@ use axum::{
 };
 use image::GenericImageView;
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Instant, SystemTime, UNIX_EPOCH},
+};
 use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
 use tracing::info;
 use vectorloom_local::{
@@ -22,6 +30,7 @@ use vectorloom_local::{
 struct AppState {
     models: Arc<ModelManager>,
     starvector: Arc<StarVectorRuntime>,
+    jobs: Arc<Mutex<HashMap<String, VectorJob>>>,
 }
 
 #[derive(Serialize)]
@@ -43,6 +52,21 @@ struct SelectModel {
 struct Accepted {
     accepted: bool,
 }
+
+#[derive(Clone, Serialize)]
+struct JobAccepted {
+    job_id: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum VectorJob {
+    Processing,
+    Complete { result: VectorizedImage },
+    Failed { error: String },
+}
+
+static NEXT_JOB_ID: AtomicU64 = AtomicU64::new(1);
 
 #[tokio::main]
 async fn main() {
@@ -69,10 +93,13 @@ async fn main() {
     let state = AppState {
         models: model_manager,
         starvector: Arc::new(StarVectorRuntime::new()),
+        jobs: Arc::new(Mutex::new(HashMap::new())),
     };
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/vectorize", post(vectorize_upload))
+        .route("/api/vectorize/jobs", post(start_vectorize_job))
+        .route("/api/vectorize/jobs/{job_id}", get(vectorize_job))
         .route("/api/models", get(models))
         .fallback_service(ServeDir::new("web").append_index_html_on_directories(true))
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
@@ -153,7 +180,79 @@ async fn vectorize_upload(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let processing_started = Instant::now();
+    let (bytes, kind) = read_vectorize_request(&state, &mut multipart).await?;
+    let installed = state.models.is_installed(kind).await;
+    let model_dir = state.models.model_dir(kind);
+    let runtime = Arc::clone(&state.starvector);
+    let result = tokio::task::spawn_blocking(move || {
+        vectorize_with_model(runtime, installed, model_dir, kind, bytes)
+    })
+    .await
+    .map_err(api_error)?
+    .map_err(api_error)?;
+    Ok(Json(result))
+}
+
+async fn start_vectorize_job(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<(StatusCode, Json<JobAccepted>), (StatusCode, Json<ApiError>)> {
+    let (bytes, kind) = read_vectorize_request(&state, &mut multipart).await?;
+    let installed = state.models.is_installed(kind).await;
+    let model_dir = state.models.model_dir(kind);
+    let runtime = Arc::clone(&state.starvector);
+    let job_id = format!(
+        "{:x}-{:x}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+        NEXT_JOB_ID.fetch_add(1, Ordering::Relaxed),
+    );
+    state
+        .jobs
+        .lock()
+        .expect("jobs lock")
+        .insert(job_id.clone(), VectorJob::Processing);
+    let jobs = Arc::clone(&state.jobs);
+    let result_job_id = job_id.clone();
+    tokio::task::spawn_blocking(move || {
+        let job = match vectorize_with_model(runtime, installed, model_dir, kind, bytes) {
+            Ok(result) => VectorJob::Complete { result },
+            Err(error) => VectorJob::Failed {
+                error: format!("{error:#}"),
+            },
+        };
+        jobs.lock().expect("jobs lock").insert(result_job_id, job);
+    });
+    Ok((StatusCode::ACCEPTED, Json(JobAccepted { job_id })))
+}
+
+async fn vectorize_job(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+) -> Result<Json<VectorJob>, (StatusCode, Json<ApiError>)> {
+    state
+        .jobs
+        .lock()
+        .expect("jobs lock")
+        .get(&job_id)
+        .cloned()
+        .map(Json)
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ApiError {
+                    error: "Vectorization job not found or expired.".to_owned(),
+                }),
+            )
+        })
+}
+
+async fn read_vectorize_request(
+    state: &AppState,
+    multipart: &mut Multipart,
+) -> Result<(axum::body::Bytes, ModelKind), (StatusCode, Json<ApiError>)> {
     let mut uploaded_image = None;
     let mut requested_model = None;
     while let Some(field) = multipart.next_field().await.map_err(api_error)? {
@@ -181,52 +280,51 @@ async fn vectorize_upload(
         .map(parse_model)
         .transpose()?
         .unwrap_or_else(|| state.models.selected());
-    let installed = state.models.is_installed(kind).await;
-    let model_dir = state.models.model_dir(kind);
-    let runtime = Arc::clone(&state.starvector);
-    let mut result = tokio::task::spawn_blocking(move || {
-        if installed {
-            match runtime.generate(kind, &model_dir, &bytes) {
-                Ok(generated) => {
-                    let image = image::load_from_memory(&bytes)?;
-                    let (width, height) = image.dimensions();
-                    return Ok::<VectorizedImage, anyhow::Error>(VectorizedImage {
-                        svg: generated.svg,
-                        width,
-                        height,
-                        elapsed_ms: generated.elapsed_ms,
-                        engine: generated.engine,
-                        status: runtime_status(),
-                        warning: None,
-                    });
-                }
-                Err(error) => {
-                    tracing::warn!(
-                        model = %kind.label(),
-                        error = %format!("{error:#}"),
-                        "StarVector inference failed; using VTracer fallback"
-                    );
-                    let mut fallback = vectorize(&bytes)?;
-                    fallback.warning = Some(format!(
-                        "{} inference failed, so the verified local tracer was used: {error:#}",
-                        kind.label()
-                    ));
-                    return Ok(fallback);
-                }
+    Ok((bytes, kind))
+}
+
+fn vectorize_with_model(
+    runtime: Arc<StarVectorRuntime>,
+    installed: bool,
+    model_dir: PathBuf,
+    kind: ModelKind,
+    bytes: axum::body::Bytes,
+) -> anyhow::Result<VectorizedImage> {
+    let processing_started = Instant::now();
+    if installed {
+        match runtime.generate(kind, &model_dir, &bytes) {
+            Ok(generated) => {
+                let image = image::load_from_memory(&bytes)?;
+                let (width, height) = image.dimensions();
+                return Ok(VectorizedImage {
+                    svg: generated.svg,
+                    width,
+                    height,
+                    elapsed_ms: processing_started.elapsed().as_millis(),
+                    engine: generated.engine,
+                    status: runtime_status(),
+                    warning: None,
+                });
+            }
+            Err(error) => {
+                tracing::warn!(model = %kind.label(), error = %format!("{error:#}"), "StarVector inference failed; using VTracer fallback");
+                let mut fallback = vectorize(&bytes)?;
+                fallback.warning = Some(format!(
+                    "{} inference failed, so the verified local tracer was used: {error:#}",
+                    kind.label()
+                ));
+                fallback.elapsed_ms = processing_started.elapsed().as_millis();
+                return Ok(fallback);
             }
         }
-        let mut fallback = vectorize(&bytes)?;
-        fallback.warning = Some(format!(
-            "{} is not downloaded; using the verified local tracer.",
-            kind.label()
-        ));
-        Ok(fallback)
-    })
-    .await
-    .map_err(api_error)?
-    .map_err(api_error)?;
-    result.elapsed_ms = processing_started.elapsed().as_millis();
-    Ok(Json(result))
+    }
+    let mut fallback = vectorize(&bytes)?;
+    fallback.warning = Some(format!(
+        "{} is not downloaded; using the verified local tracer.",
+        kind.label()
+    ));
+    fallback.elapsed_ms = processing_started.elapsed().as_millis();
+    Ok(fallback)
 }
 
 fn parse_model(value: &str) -> Result<ModelKind, (StatusCode, Json<ApiError>)> {

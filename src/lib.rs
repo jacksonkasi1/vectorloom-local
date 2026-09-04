@@ -19,7 +19,7 @@ pub struct RuntimeStatus {
     pub detail: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct VectorizedImage {
     pub svg: String,
     pub width: u32,
