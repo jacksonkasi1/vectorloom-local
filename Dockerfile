@@ -22,7 +22,7 @@ ENV VECTOR_BIND=0.0.0.0 \
     VECTOR_MODEL_DIR=/models \
     RUST_LOG=info
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip git && \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip git libcairo2 && \
     rm -rf /var/lib/apt/lists/* && \
     python3 -m pip install --no-cache-dir --upgrade pip && \
     python3 -m pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu124 && \
