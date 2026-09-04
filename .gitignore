@@ -4,3 +4,4 @@
 models/
 *.svg
 !fixtures/*.svg
+deploy/__pycache__/

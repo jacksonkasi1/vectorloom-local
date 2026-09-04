@@ -3,3 +3,4 @@ target
 dist
 models
 .firecrawl
+deploy/__pycache__/
