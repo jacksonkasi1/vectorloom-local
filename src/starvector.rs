@@ -86,10 +86,15 @@ impl StarVectorRuntime {
         let generation = GenerationConfig {
             max_new_tokens,
             num_beams: 1,
-            // SVG is a strict grammar: deterministic decoding avoids random
-            // malformed attributes on detailed 8B outputs.
-            do_sample: false,
-            temperature: 0.0,
+            // The released 8B checkpoint needs sampling to emit meaningful
+            // image-conditioned SVG; validation below repairs only its known
+            // truncated/malformed-element edge cases.
+            do_sample: matches!(kind, ModelKind::EightB),
+            temperature: if matches!(kind, ModelKind::EightB) {
+                0.7
+            } else {
+                0.2
+            },
             top_p: 0.95,
             repetition_penalty: 1.0,
             // Favor the closing SVG token without forcing it early.
