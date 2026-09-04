@@ -4,7 +4,7 @@ Local-only image vectorization for Apple Silicon. The UI is deliberately simple:
 
 ## Install the macOS app
 
-Download `VectorLoom-macOS-universal.zip`, unzip it, and move `VectorLoom.app` to Applications. The app is Universal: Apple Silicon runs native Metal/BF16 inference, while Intel Macs use Accelerate CPU/F32. Because the development build is ad-hoc signed rather than Apple-notarized, the first launch from a downloaded ZIP may require right-clicking the app and choosing **Open**.
+Download `VectorLoom-macOS-universal.dmg`, open it, and drag `VectorLoom.app` to Applications. A ZIP is also provided. The app is Universal: Apple Silicon runs native Metal/BF16 inference, while Intel Macs use Accelerate CPU/F32. Because the development build is ad-hoc signed rather than Apple-notarized, the first launch may require right-clicking the app and choosing **Open**.
 
 The app downloads models on demand and stores them in `~/Library/Application Support/VectorLoom/models`. Downloaded checkpoints survive app upgrades. Use **Delete model** to remove a local checkpoint and reclaim its 4.8 GiB or 14.0 GiB; VectorLoom asks for confirmation first.
 
@@ -14,7 +14,7 @@ Build the Universal app and installer locally with:
 ./scripts/build-macos-app.sh
 ```
 
-Outputs are written to `dist/VectorLoom.app` and `dist/VectorLoom-macOS-universal.zip`.
+Outputs are written to `dist/VectorLoom.app`, `dist/VectorLoom-macOS-universal.dmg`, and `dist/VectorLoom-macOS-universal.zip`.
 
 ## Run from source
 

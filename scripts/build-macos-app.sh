@@ -45,5 +45,14 @@ codesign --force --deep --sign - "$APP_DIR"
 rm -f -- "$DIST_DIR/VectorLoom-macOS-universal.zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "$DIST_DIR/VectorLoom-macOS-universal.zip"
 
+DMG_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/vectorloom-dmg.XXXXXX")"
+trap 'rm -rf -- "$DMG_STAGE"' EXIT
+cp -R "$APP_DIR" "$DMG_STAGE/VectorLoom.app"
+ln -s /Applications "$DMG_STAGE/Applications"
+rm -f -- "$DIST_DIR/VectorLoom-macOS-universal.dmg"
+hdiutil create -quiet -volname "VectorLoom" -srcfolder "$DMG_STAGE" -ov -format UDZO \
+  "$DIST_DIR/VectorLoom-macOS-universal.dmg"
+
 echo "Built $APP_DIR"
 echo "Installer $DIST_DIR/VectorLoom-macOS-universal.zip"
+echo "Disk image $DIST_DIR/VectorLoom-macOS-universal.dmg"
