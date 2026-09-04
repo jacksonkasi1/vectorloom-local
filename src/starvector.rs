@@ -131,12 +131,57 @@ fn validate_svg(raw: String, allow_tag_recovery: bool) -> Result<String> {
             "model output contains forbidden SVG content"
         );
     }
+    let svg = match roxmltree::Document::parse(&svg) {
+        Ok(_) => svg,
+        Err(_) if allow_tag_recovery => balance_svg_tags(&remove_malformed_tags(&svg))?,
+        Err(error) => return Err(error).context("model output is not valid XML"),
+    };
     let document = roxmltree::Document::parse(&svg).context("model output is not valid XML")?;
     anyhow::ensure!(
         document.root_element().tag_name().name() == "svg",
         "model output root is not SVG"
     );
     Ok(svg)
+}
+
+/// Drop only an unterminated element when the decoder emits a new `<` before
+/// closing a quoted attribute. Valid tags and all following elements remain.
+fn remove_malformed_tags(raw: &str) -> String {
+    let mut clean = String::with_capacity(raw.len());
+    let mut cursor = 0;
+    while let Some(relative_start) = raw[cursor..].find('<') {
+        let start = cursor + relative_start;
+        clean.push_str(&raw[cursor..start]);
+        let mut quote = None;
+        let mut end = None;
+        let mut nested = None;
+        for (relative, ch) in raw[start + 1..].char_indices() {
+            let index = start + 1 + relative;
+            match (quote, ch) {
+                (Some(current), value) if value == current => quote = None,
+                (None, '\"' | '\'') => quote = Some(ch),
+                (Some(_), '<') => {
+                    nested = Some(index);
+                    break;
+                }
+                (None, '>') => {
+                    end = Some(index);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        if let Some(end) = end {
+            clean.push_str(&raw[start..=end]);
+            cursor = end + 1;
+        } else if let Some(next) = nested {
+            cursor = next;
+        } else {
+            break;
+        }
+    }
+    clean.push_str(&raw[cursor..]);
+    clean
 }
 
 fn balance_svg_tags(raw: &str) -> Result<String> {
