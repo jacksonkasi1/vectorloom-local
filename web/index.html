@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VectorLoom — local image vectorizer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">LOCAL VECTOR LAB</p>
+        <h1>Turn pixels into paths.</h1>
+        <p class="lede">Drop an image. VectorLoom chooses the pipeline, traces it locally, and gives you a ready-to-use SVG.</p>
+      </header>
+      <section class="workspace" aria-live="polite">
+        <label id="dropzone" class="dropzone" for="image-input">
+          <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+          <span class="drop-icon">↗</span>
+          <strong>Choose an image</strong>
+          <small>PNG, JPG, or WebP · processed only on this Mac</small>
+        </label>
+        <div id="progress" class="progress hidden"><span></span><p>Building vectors…</p></div>
+        <section id="result" class="result hidden">
+          <div class="preview"><img id="preview" alt="Vectorized SVG preview" /></div>
+          <div class="result-bar">
+            <p id="result-meta"></p>
+            <a id="download" class="download" download="vectorloom.svg">Download SVG</a>
+          </div>
+        </section>
+        <p id="error" class="error hidden" role="alert"></p>
+      </section>
+      <footer><span id="runtime">Checking local runtime…</span><span>No upload. No account. No cloud.</span></footer>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
