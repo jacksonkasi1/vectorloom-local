@@ -132,7 +132,10 @@ fn generate_with_official_runtime(
     let mut input = tempfile::Builder::new().suffix(".png").tempfile()?;
     input.write_all(image)?;
     let output = tempfile::Builder::new().suffix(".svg").tempfile()?;
-    let status = Command::new("python3")
+    // Modal adds a separate Python 3.12 runtime for its control plane. The
+    // CUDA Torch and official StarVector packages live in the base image's
+    // Python 3.10 environment, so call it explicitly.
+    let status = Command::new("/usr/bin/python3")
         .args([
             "/app/reference_vectorize.py",
             &input.path().display().to_string(),
