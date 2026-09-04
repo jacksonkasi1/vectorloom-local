@@ -16,7 +16,9 @@ models = modal.Volume.from_name("vectorloom-models", create_if_missing=True)
 
 @app.function(
     image=image,
-    gpu="A10G",
+    # The 8B checkpoint exceeds the A10G's VRAM. L40S supplies 48 GB, which
+    # is sufficient for the quality model while retaining serverless scaling.
+    gpu="L40S",
     volumes={"/models": models},
     timeout=60 * 60,
     scaledown_window=120,
