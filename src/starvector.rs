@@ -98,7 +98,10 @@ impl StarVectorRuntime {
             // output budget without emitting the closing `</svg>` token.
             // Favoring that token preserves a complete, valid document while
             // still letting the model decide when the drawing is finished.
-            svg_stop_bias: 5.0,
+            // The detailed 8B badge output can otherwise consume the entire
+            // context window before writing its closing SVG tag. A strong
+            // close-tag preference leaves a small, valid-document reserve.
+            svg_stop_bias: 20.0,
             seed: 42,
         };
         let output = loaded
