@@ -22,8 +22,11 @@ models = modal.Volume.from_name("vectorloom-models", create_if_missing=True)
     volumes={"/models": models},
     timeout=60 * 60,
     scaledown_window=120,
+    # Jobs live in the web process while they run. Keep a single worker so
+    # polling is always routed back to the worker that owns the job.
+    max_containers=1,
 )
-@modal.concurrent(max_inputs=1)
+@modal.concurrent(max_inputs=16)
 @modal.web_server(3000, startup_timeout=1800)
 def vectorloom():
     # Serve the UI immediately; the Rust service downloads missing checkpoints
