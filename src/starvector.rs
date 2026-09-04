@@ -135,16 +135,20 @@ fn generate_with_official_runtime(
     // Modal adds a separate Python 3.12 runtime for its control plane. The
     // CUDA Torch and official StarVector packages live in the base image's
     // Python 3.10 environment, so call it explicitly.
-    let status = Command::new("/usr/bin/python3")
+    let process = Command::new("/usr/bin/python3")
         .args([
             "/app/reference_vectorize.py",
             &input.path().display().to_string(),
             &output.path().display().to_string(),
             &model_dir.display().to_string(),
         ])
-        .status()
+        .output()
         .context("start official StarVector 8B runtime")?;
-    anyhow::ensure!(status.success(), "official StarVector 8B runtime failed");
+    if !process.status.success() {
+        let stderr = String::from_utf8_lossy(&process.stderr);
+        let diagnostic = stderr.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+        anyhow::bail!("official StarVector 8B runtime failed: {diagnostic}");
+    }
     let raw = std::fs::read_to_string(output.path()).context("read official StarVector SVG")?;
     Ok(StarVectorResult {
         svg: validate_svg(raw, true)?,
