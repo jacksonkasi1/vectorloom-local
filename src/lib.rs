@@ -4,6 +4,9 @@ use serde::Serialize;
 use std::{env, time::Instant};
 use vtracer::{ColorImage, Config, FitMode, Hierarchical, Preset};
 
+pub mod models;
+pub mod starvector;
+
 const MAX_EDGE: u32 = 4_096;
 
 #[derive(Debug, Clone, Serialize)]
@@ -22,8 +25,9 @@ pub struct VectorizedImage {
     pub width: u32,
     pub height: u32,
     pub elapsed_ms: u128,
-    pub engine: &'static str,
+    pub engine: String,
     pub status: RuntimeStatus,
+    pub warning: Option<String>,
 }
 
 pub fn runtime_status() -> RuntimeStatus {
@@ -31,22 +35,17 @@ pub fn runtime_status() -> RuntimeStatus {
         Ok("1b") => "StarVector 1B",
         _ => "StarVector 8B",
     };
-    let model_dir = env::var("STARVECTOR_MODEL_DIR").ok();
-    let device = if cfg!(target_os = "macos") {
-        "Metal preferred; not enabled for the current StarVector Rust runtime".to_owned()
-    } else {
-        "CPU".to_owned()
-    };
-    let detail = if model_dir.is_some() {
-        "Checkpoint location found, but no validated Candle/Metal StarVector executor is linked yet; VTracer is used explicitly.".to_owned()
-    } else {
-        "No local StarVector checkpoint configured; VTracer is used explicitly. Set STARVECTOR_MODEL_DIR only after a validated executor is installed.".to_owned()
-    };
+    let device = models::runtime_device_label().to_owned();
+    let detail = "Rust StarVector inference is linked. Downloaded checkpoints run in-process; missing or invalid model output uses the visible VTracer fallback.".to_owned();
     RuntimeStatus {
         requested_model,
         device,
-        precision: "BF16 planned for Metal executor",
-        model_runtime: "not linked (no false GPU claim)",
+        precision: if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            "BF16"
+        } else {
+            "F32"
+        },
+        model_runtime: "linked and checkpoint-gated",
         fallback_engine: "VTracer spline/cutout pipeline",
         detail,
     }
@@ -89,8 +88,9 @@ pub fn vectorize(bytes: &[u8]) -> Result<VectorizedImage> {
         width,
         height,
         elapsed_ms: started.elapsed().as_millis(),
-        engine: "VTracer automatic spline/cutout",
+        engine: "VTracer automatic spline/cutout".to_owned(),
         status: runtime_status(),
+        warning: None,
     })
 }
 

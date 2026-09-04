@@ -9,7 +9,7 @@ Completed before implementation on 2026-09-04.
 | 8B architecture | SigLIP encoder + LayerNorm adapter + StarCoder2 decoder. | Treat as a distinct profile; it is the default future quality engine. |
 | Model assets | Hugging Face safetensors checkpoints; Rust reference also supports GGUF. | Support both only after parity tests validate output. |
 | Rust reference | `oxide-lab/starvector-rs`, Apache-2.0, CPU/CUDA feature set. | Useful design reference, not copied or linked yet. |
-| Metal | The inspected reference declares no Metal feature; a working Apple GPU path cannot be asserted. | Report Metal as preferred-but-unlinked until Candle operators and parity are validated. |
+| Metal | The inspected reference declared no Metal feature. The maintained fork adds `RuntimeDevice::Metal`, Candle Metal features, and BF16 policy. | Metal compiles on macOS; runtime acceptance must be executed on Apple Silicon because this development host is Intel. |
 | Current local output | VTracer 1.0 Rust library, MIT OR Apache-2.0, supports color segmentation, splines, cutout compositing, and optimized SVG. | Ship as transparent high-quality automatic fallback. |
 
 ## Metal port gate

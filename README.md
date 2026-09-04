@@ -9,14 +9,25 @@ cargo run --release
 open http://127.0.0.1:3000
 ```
 
+On macOS, double-click `VectorLoom.command` for the same release-mode startup.
+
+The model panel downloads official, revision-pinned Hugging Face checkpoints directly to `models/` with resumable partial files:
+
+- StarVector 1B: 4.8 GiB, the practical debugging/faster option.
+- StarVector 8B: 14.0 GiB, the default quality option for the intended 64 GB Apple Silicon machine.
+
+Selecting a model is remembered across restarts. When there is no saved choice, an already-downloaded 1B checkpoint is preferred over an unavailable 8B checkpoint. Selecting a downloaded model makes uploads use real in-process Candle inference; the loaded model is cached between requests.
+
 All files are processed in memory by the process bound to `127.0.0.1`; no image or SVG is persisted or transmitted.
 
 ## Current inference policy
 
-- `VECTOR_MODEL=8b` is the default declared quality target; `VECTOR_MODEL=1b` is accepted for future benchmarking/fallback work.
-- The included runtime uses VTracer's Rust library with automatically selected palette size, spline fitting, seam-free cutout compositing, and SVG optimization.
-- The API clearly reports the active engine and will not claim StarVector or Metal execution when those components are not linked.
-- The checked Rust reference supports safetensors and GGUF on CPU/CUDA, but does not currently expose a Metal feature. The next phase is a validated Candle Metal port for the exact 1B and 8B model profiles.
+- `VECTOR_MODEL=8b` and `VECTOR_MODEL=1b` can override the saved model choice at startup.
+- The included runtime uses the Metal-enabled `jacksonkasi1/starvector-rs` fork for real in-process 1B/8B inference and validates generated XML before download.
+- Apple Silicon selects Candle Metal/BF16 automatically. Intel Macs use CPU/F32 with Apple's Accelerate framework.
+- If a checkpoint is missing or inference fails, VTracer's Rust spline/cutout pipeline remains available and the UI shows the fallback reason.
+
+StarVector generates SVG text one token at a time. The first conversion also loads several gigabytes of weights; later conversions reuse the loaded model and are substantially faster. The UI reports the full wait as a live `h m s` timer. For development-only bounded runs, `VECTOR_MAX_TOKENS=512 cargo run --release` limits generation, but too small a value can truncate complex SVGs and trigger the visible tracer fallback.
 
 See [STARVECTOR_RESEARCH.md](STARVECTOR_RESEARCH.md) for the investigation and implementation boundary.
 

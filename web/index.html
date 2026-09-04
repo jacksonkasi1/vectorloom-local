@@ -14,17 +14,25 @@
         <p class="lede">Drop an image. VectorLoom chooses the pipeline, traces it locally, and gives you a ready-to-use SVG.</p>
       </header>
       <section class="workspace" aria-live="polite">
+        <section class="model-panel">
+          <div class="model-heading">
+            <div><p class="eyebrow">INFERENCE MODEL</p><h2>Choose your engine.</h2></div>
+            <span id="device">Detecting hardware…</span>
+          </div>
+          <div id="models" class="models"></div>
+          <p id="hardware-note" class="hardware-note"></p>
+        </section>
         <label id="dropzone" class="dropzone" for="image-input">
           <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
           <span class="drop-icon">↗</span>
           <strong>Choose an image</strong>
           <small>PNG, JPG, or WebP · processed only on this Mac</small>
         </label>
-        <div id="progress" class="progress hidden"><span></span><p>Building vectors…</p></div>
+        <div id="progress" class="progress hidden"><span></span><p id="progress-text">Building vectors… 0h 0m 0s</p></div>
         <section id="result" class="result hidden">
           <div class="preview"><img id="preview" alt="Vectorized SVG preview" /></div>
           <div class="result-bar">
-            <p id="result-meta"></p>
+            <div><p id="result-meta"></p><p id="result-warning" class="result-warning"></p></div>
             <a id="download" class="download" download="vectorloom.svg">Download SVG</a>
           </div>
         </section>
