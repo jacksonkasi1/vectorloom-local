@@ -1,7 +1,7 @@
 use crate::models::ModelKind;
 use anyhow::{Context, Result};
 use starvector_rs::{GenerationConfig, PrecisionPolicy, RuntimeDevice, StarVector};
-use std::{io::Write, path::Path, sync::Mutex, time::Instant};
+use std::{io::Write, path::Path, process::Command, sync::Mutex, time::Instant};
 
 pub struct StarVectorResult {
     pub svg: String,
@@ -46,6 +46,11 @@ impl StarVectorRuntime {
         image: &[u8],
     ) -> Result<StarVectorResult> {
         let started = Instant::now();
+        if matches!(kind, ModelKind::EightB)
+            && std::env::var_os("VECTOR_OFFICIAL_8B_RUNTIME").is_some()
+        {
+            return generate_with_official_runtime(model_dir, image, started);
+        }
         let mut loaded = self.loaded.lock().expect("StarVector runtime lock");
         if loaded.as_ref().map(|value| value.kind) != Some(kind) {
             let runtime_device = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
@@ -117,6 +122,32 @@ impl StarVectorRuntime {
             engine: format!("{} · {}", kind.label(), loaded.device_name),
         })
     }
+}
+
+fn generate_with_official_runtime(
+    model_dir: &Path,
+    image: &[u8],
+    started: Instant,
+) -> Result<StarVectorResult> {
+    let mut input = tempfile::Builder::new().suffix(".png").tempfile()?;
+    input.write_all(image)?;
+    let output = tempfile::Builder::new().suffix(".svg").tempfile()?;
+    let status = Command::new("python3")
+        .args([
+            "/app/reference_vectorize.py",
+            &input.path().display().to_string(),
+            &output.path().display().to_string(),
+            &model_dir.display().to_string(),
+        ])
+        .status()
+        .context("start official StarVector 8B runtime")?;
+    anyhow::ensure!(status.success(), "official StarVector 8B runtime failed");
+    let raw = std::fs::read_to_string(output.path()).context("read official StarVector SVG")?;
+    Ok(StarVectorResult {
+        svg: validate_svg(raw, true)?,
+        elapsed_ms: started.elapsed().as_millis(),
+        engine: "StarVector 8B · official Transformers CUDA".to_owned(),
+    })
 }
 
 fn validate_svg(raw: String, allow_tag_recovery: bool) -> Result<String> {

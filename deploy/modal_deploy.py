@@ -35,6 +35,7 @@ def vectorloom():
     # in the background and exposes their live progress through /api/models.
     os.environ["VECTOR_AUTO_DOWNLOAD"] = "all"
     os.environ["VECTOR_MODEL"] = "8b"
+    os.environ["VECTOR_OFFICIAL_8B_RUNTIME"] = "1"
     subprocess.Popen(["/app/vectorloom-local"])
 
 

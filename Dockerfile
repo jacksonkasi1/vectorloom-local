@@ -22,7 +22,14 @@ ENV VECTOR_BIND=0.0.0.0 \
     VECTOR_MODEL_DIR=/models \
     RUST_LOG=info
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip git && \
+    rm -rf /var/lib/apt/lists/* && \
+    python3 -m pip install --no-cache-dir --upgrade pip && \
+    python3 -m pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu124 && \
+    python3 -m pip install --no-cache-dir transformers==4.49.0 tokenizers==0.21.1 accelerate pillow sentencepiece && \
+    python3 -m pip install --no-cache-dir --no-deps git+https://github.com/joanrod/star-vector.git
 COPY --from=builder /src/target/release/vectorloom-local /app/vectorloom-local
+COPY reference_vectorize.py /app/reference_vectorize.py
 COPY web /app/web
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh && mkdir -p /models
