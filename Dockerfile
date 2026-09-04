@@ -8,6 +8,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --pr
 ENV PATH=/root/.cargo/bin:$PATH
 # Modal's image builder has CUDA tooling but no attached GPU. Compile kernels
 # for the deployment GPU explicitly instead of asking nvidia-smi at build time.
+# Ampere compute capability covers the A10G used by the hosted runtime.
 ENV CUDA_COMPUTE_CAP=80
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
@@ -26,4 +27,6 @@ COPY web /app/web
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh && mkdir -p /models
 EXPOSE 3000
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+# Modal starts its own Python function runner.  It launches the Rust process
+# explicitly from deploy/modal_deploy.py, so no container entrypoint is set
+# here (an entrypoint would start a competing copy of the server).

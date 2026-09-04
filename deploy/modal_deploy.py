@@ -4,6 +4,7 @@ Run:  pip install modal && modal deploy deploy/modal_deploy.py
 The first deployment downloads about 20 GB of public StarVector checkpoints
 into the persistent `vectorloom-models` volume before the site becomes ready.
 """
+import os
 import subprocess
 
 import modal
@@ -15,7 +16,7 @@ models = modal.Volume.from_name("vectorloom-models", create_if_missing=True)
 
 @app.function(
     image=image,
-    gpu="A100-80GB",
+    gpu="A10G",
     volumes={"/models": models},
     timeout=60 * 60,
     scaledown_window=120,
@@ -23,7 +24,7 @@ models = modal.Volume.from_name("vectorloom-models", create_if_missing=True)
 @modal.concurrent(max_inputs=1)
 @modal.web_server(3000, startup_timeout=1800)
 def vectorloom():
-    # Persist any first-run checkpoint downloads before accepting browser traffic.
-    subprocess.run(["/app/vectorloom-local", "--bootstrap-models"], check=True)
-    models.commit()
+    # Serve the UI immediately; the Rust service downloads missing checkpoints
+    # in the background and exposes their live progress through /api/models.
+    os.environ["VECTOR_AUTO_DOWNLOAD"] = "all"
     subprocess.Popen(["/app/vectorloom-local"])

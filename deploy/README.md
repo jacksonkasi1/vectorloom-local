@@ -1,8 +1,9 @@
 # Hosted deployment
 
 The Docker image is a full public VectorLoom service: it serves the browser UI
-and `POST /api/vectorize` from one URL. It starts only after both 1B and 8B
-StarVector checkpoint sets exist in the mounted `/models` directory.
+and `POST /api/vectorize` from one URL. It serves the UI immediately, then
+downloads either missing StarVector checkpoint into mounted `/models` storage
+in the background. The model selector shows live preparation progress.
 
 Both models need approximately 20 GB of persistent storage. Use an NVIDIA GPU
 with at least 24 GB VRAM for the 1B model; an A100 80 GB is configured because
