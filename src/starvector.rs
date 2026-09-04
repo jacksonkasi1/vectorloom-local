@@ -101,19 +101,23 @@ impl StarVectorRuntime {
             .generate_svg(temp.path(), &generation)
             .context("generate SVG")?;
         Ok(StarVectorResult {
-            svg: validate_svg(output.svg)?,
+            // 8B reliably draws the whole image but can consume its context
+            // before emitting closing XML tags. Recover only that known model
+            // case; 1B remains strict because its partial output is unreliable.
+            svg: validate_svg(output.svg, matches!(kind, ModelKind::EightB))?,
             elapsed_ms: started.elapsed().as_millis(),
             engine: format!("{} · {}", kind.label(), loaded.device_name),
         })
     }
 }
 
-fn validate_svg(raw: String) -> Result<String> {
+fn validate_svg(raw: String, allow_tag_recovery: bool) -> Result<String> {
     let start = raw.find("<svg").context("model output has no SVG root")?;
-    let close = raw
-        .rfind("</svg>")
-        .context("model output is incomplete (missing </svg>)")?;
-    let svg = raw[start..close + "</svg>".len()].trim().to_owned();
+    let svg = match raw.rfind("</svg>") {
+        Some(close) => raw[start..close + "</svg>".len()].trim().to_owned(),
+        None if allow_tag_recovery => balance_svg_tags(&raw[start..])?,
+        None => anyhow::bail!("model output is incomplete (missing </svg>)"),
+    };
     let lower = svg.to_ascii_lowercase();
     for forbidden in [
         "<script",
@@ -135,6 +139,50 @@ fn validate_svg(raw: String) -> Result<String> {
     Ok(svg)
 }
 
+fn balance_svg_tags(raw: &str) -> Result<String> {
+    let end = raw
+        .rfind('>')
+        .context("model output has no complete SVG element")?;
+    let complete = &raw[..=end];
+    let mut open = Vec::new();
+    let mut offset = 0;
+    while let Some(relative_start) = complete[offset..].find('<') {
+        let start = offset + relative_start;
+        let Some(relative_end) = complete[start..].find('>') else {
+            break;
+        };
+        let end = start + relative_end;
+        let tag = complete[start + 1..end].trim();
+        offset = end + 1;
+        if tag.is_empty() || tag.starts_with('!') || tag.starts_with('?') || tag.ends_with('/') {
+            continue;
+        }
+        if let Some(name) = tag.strip_prefix('/') {
+            if open
+                .last()
+                .is_some_and(|value| value == name.split_whitespace().next().unwrap_or_default())
+            {
+                open.pop();
+            }
+        } else if let Some(name) = tag
+            .split_whitespace()
+            .next()
+            .filter(|name| !name.is_empty())
+        {
+            open.push(name.to_owned());
+        }
+    }
+    anyhow::ensure!(
+        open.first().is_some_and(|tag| tag == "svg"),
+        "model output has no SVG root"
+    );
+    let mut recovered = complete.to_owned();
+    while let Some(tag) = open.pop() {
+        recovered.push_str(&format!("</{tag}>"));
+    }
+    Ok(recovered)
+}
+
 #[cfg(test)]
 mod tests {
     use super::validate_svg;
@@ -144,6 +192,7 @@ mod tests {
         let svg = validate_svg(
             "noise <svg xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M0 0\"/></svg> tail"
                 .to_owned(),
+            false,
         )
         .unwrap();
         assert!(svg.starts_with("<svg"));
@@ -152,12 +201,12 @@ mod tests {
 
     #[test]
     fn rejects_incomplete_or_active_content() {
-        assert!(validate_svg("not an svg".to_owned()).is_err());
-        assert!(validate_svg("<svg><script>alert(1)</script></svg>".to_owned()).is_err());
+        assert!(validate_svg("not an svg".to_owned(), false).is_err());
+        assert!(validate_svg("<svg><script>alert(1)</script></svg>".to_owned(), false).is_err());
     }
 
     #[test]
     fn rejects_incomplete_model_svg() {
-        assert!(validate_svg("<svg><path d=\"M0 0\"/>".to_owned()).is_err());
+        assert!(validate_svg("<svg><path d=\"M0 0\"/>".to_owned(), false).is_err());
     }
 }
