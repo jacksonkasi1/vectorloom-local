@@ -27,7 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 python3
     python3 -m pip install --no-cache-dir --upgrade pip && \
     python3 -m pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu124 && \
     python3 -m pip install --no-cache-dir transformers==4.49.0 tokenizers==0.21.1 accelerate pillow sentencepiece omegaconf fairscale matplotlib beautifulsoup4 svgpathtools cairosvg && \
-    python3 -m pip install --no-cache-dir --no-deps --ignore-requires-python git+https://github.com/joanrod/star-vector.git
+    python3 -m pip install --no-cache-dir --no-deps --ignore-requires-python git+https://github.com/joanrod/star-vector.git && \
+    sed -i 's/attn_implementation="flash_attention_2"/attn_implementation="sdpa"/' /usr/local/lib/python3.10/dist-packages/starvector/model/llm/starcoder2.py
 COPY --from=builder /src/target/release/vectorloom-local /app/vectorloom-local
 COPY reference_vectorize.py /app/reference_vectorize.py
 COPY web /app/web
