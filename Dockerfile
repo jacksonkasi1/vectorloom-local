@@ -6,6 +6,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
 ENV PATH=/root/.cargo/bin:$PATH
+# Modal's image builder has CUDA tooling but no attached GPU. Compile kernels
+# for the deployment GPU explicitly instead of asking nvidia-smi at build time.
+ENV CUDA_COMPUTE_CAP=80
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
