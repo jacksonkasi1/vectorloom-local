@@ -201,9 +201,14 @@ async fn vectorize_upload(
                     });
                 }
                 Err(error) => {
+                    tracing::warn!(
+                        model = %kind.label(),
+                        error = %format!("{error:#}"),
+                        "StarVector inference failed; using VTracer fallback"
+                    );
                     let mut fallback = vectorize(&bytes)?;
                     fallback.warning = Some(format!(
-                        "{} inference failed, so the verified local tracer was used: {error}",
+                        "{} inference failed, so the verified local tracer was used: {error:#}",
                         kind.label()
                     ));
                     return Ok(fallback);
