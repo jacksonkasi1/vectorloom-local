@@ -12,7 +12,9 @@ def main(image_path, output_path, model_path):
         model_path, torch_dtype=torch.float16, trust_remote_code=True
     ).cuda().eval()
     processor = model.model.processor
-    image = processor(Image.open(image_path).convert("RGBA"), return_tensors="pt")["pixel_values"].cuda()
+    # SigLIP expects a three-channel image.  Flatten transparent uploads onto
+    # RGB before preprocessing so PNG logos with an alpha channel work too.
+    image = processor(Image.open(image_path).convert("RGB"), return_tensors="pt")["pixel_values"].cuda()
     if image.shape[0] == 1:
         image = image.squeeze(0)
     with torch.inference_mode():
