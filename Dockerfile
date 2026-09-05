@@ -34,6 +34,7 @@ COPY reference_vectorize.py /app/reference_vectorize.py
 COPY web /app/web
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh && mkdir -p /models
+ENV VECTOR_OFFICIAL_RUNTIME=1
 EXPOSE 3000
 # Modal starts its own Python function runner.  It launches the Rust process
 # explicitly from deploy/modal_deploy.py, so no container entrypoint is set

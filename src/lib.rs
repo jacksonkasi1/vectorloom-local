@@ -36,7 +36,12 @@ pub fn runtime_status() -> RuntimeStatus {
         _ => "StarVector 8B",
     };
     let device = models::runtime_device_label().to_owned();
-    let detail = "Rust StarVector inference is linked. Downloaded checkpoints run in-process; missing or invalid model output uses the visible VTracer fallback.".to_owned();
+    let official = env::var_os("VECTOR_OFFICIAL_RUNTIME").is_some();
+    let detail = if official {
+        "StarVector runs in a persistent Transformers worker. The most recently used model stays loaded; missing or invalid model output uses the visible VTracer fallback. Direct tracing skips model inference."
+    } else {
+        "Rust StarVector inference is linked. Downloaded checkpoints run in-process; missing or invalid model output uses the visible VTracer fallback. Direct tracing skips model inference."
+    }.to_owned();
     RuntimeStatus {
         requested_model,
         device,
@@ -47,7 +52,11 @@ pub fn runtime_status() -> RuntimeStatus {
         } else {
             "F32"
         },
-        model_runtime: "linked and checkpoint-gated",
+        model_runtime: if official {
+            "persistent Transformers worker"
+        } else {
+            "linked and checkpoint-gated"
+        },
         fallback_engine: "VTracer spline/cutout pipeline",
         detail,
     }

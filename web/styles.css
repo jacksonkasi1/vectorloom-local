@@ -15,6 +15,7 @@ h1 { font: 650 clamp(3rem, 9vw, 6.7rem)/.87 Fraunces, serif; letter-spacing: -.0
 .model-heading > span { color: #528651; border: 1px solid #b6cbb2; padding: .4rem .55rem; font-size: .63rem; }
 .models { display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem; margin-top: 1.1rem; }
 .model-card { border: 1px solid #d2d7ce; padding: 1rem; transition: .2s; }
+.model-card:first-child { grid-column: 1 / -1; }
 .model-card.selected { border-color: #528651; box-shadow: inset 0 0 0 1px #528651; background: #f4faef; }
 .model-name { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .model-name strong { font: 500 1.1rem Fraunces, serif; }.model-name span { color: #657269; font-size: .6rem; }

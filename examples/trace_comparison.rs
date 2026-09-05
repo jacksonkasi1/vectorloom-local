@@ -8,10 +8,16 @@ fn main() -> Result<()> {
     let bytes = std::fs::read(&args[1])?;
     let dir = std::path::Path::new(&args[2]);
     std::fs::create_dir_all(dir)?;
-    std::fs::write(dir.join("current.svg"), vectorloom_local::vectorize(&bytes)?.svg)?;
+    std::fs::write(
+        dir.join("current.svg"),
+        vectorloom_local::vectorize(&bytes)?.svg,
+    )?;
     let rgba = image::load_from_memory(&bytes)?.to_rgba8();
-    let source = ColorImage { width: rgba.width() as usize, height: rgba.height() as usize,
-                              pixels: rgba.into_raw() };
+    let source = ColorImage {
+        width: rgba.width() as usize,
+        height: rgba.height() as usize,
+        pixels: rgba.into_raw(),
+    };
     let mut config = Config::from_preset(Preset::Poster);
     config.mode = FitMode::Spline;
     config.hierarchical = Hierarchical::Cutout;

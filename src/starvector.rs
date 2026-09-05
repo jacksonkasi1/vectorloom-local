@@ -1,7 +1,13 @@
 use crate::models::ModelKind;
 use anyhow::{Context, Result};
 use starvector_rs::{GenerationConfig, PrecisionPolicy, RuntimeDevice, StarVector};
-use std::{io::Write, path::Path, process::Command, sync::Mutex, time::Instant};
+use std::{
+    io::{BufRead, BufReader, Write},
+    path::Path,
+    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    sync::Mutex,
+    time::Instant,
+};
 
 pub struct StarVectorResult {
     pub svg: String,
@@ -17,6 +23,20 @@ struct LoadedModel {
 
 pub struct StarVectorRuntime {
     loaded: Mutex<Option<LoadedModel>>,
+    official: Mutex<Option<OfficialWorker>>,
+}
+
+struct OfficialWorker {
+    child: Child,
+    input: ChildStdin,
+    output: BufReader<ChildStdout>,
+}
+
+impl Drop for OfficialWorker {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 impl Default for StarVectorRuntime {
@@ -29,11 +49,13 @@ impl StarVectorRuntime {
     pub fn new() -> Self {
         Self {
             loaded: Mutex::new(None),
+            official: Mutex::new(None),
         }
     }
 
     pub fn unload(&self, kind: ModelKind) {
         let mut loaded = self.loaded.lock().expect("StarVector runtime lock");
+        *self.official.lock().expect("official runtime lock") = None;
         if loaded.as_ref().map(|value| value.kind) == Some(kind) {
             *loaded = None;
         }
@@ -54,7 +76,8 @@ impl StarVectorRuntime {
             // loading the Python model, so requests cannot exhaust VRAM.
             let mut loaded = self.loaded.lock().expect("StarVector runtime lock");
             *loaded = None;
-            return generate_with_official_runtime(kind, model_dir, image, started);
+            let mut official = self.official.lock().expect("official runtime lock");
+            return generate_with_official_runtime(&mut official, kind, model_dir, image, started);
         }
         let mut loaded = self.loaded.lock().expect("StarVector runtime lock");
         if loaded.as_ref().map(|value| value.kind) != Some(kind) {
@@ -130,6 +153,7 @@ impl StarVectorRuntime {
 }
 
 fn generate_with_official_runtime(
+    worker: &mut Option<OfficialWorker>,
     kind: ModelKind,
     model_dir: &Path,
     image: &[u8],
@@ -141,20 +165,54 @@ fn generate_with_official_runtime(
     // Modal adds a separate Python 3.12 runtime for its control plane. The
     // CUDA Torch and official StarVector packages live in the base image's
     // Python 3.10 environment, so call it explicitly.
-    let process = Command::new("/usr/bin/python3")
-        .args([
-            "/app/reference_vectorize.py",
-            &input.path().display().to_string(),
-            &output.path().display().to_string(),
-            &model_dir.display().to_string(),
-        ])
-        .output()
-        .context("start official StarVector runtime")?;
-    if !process.status.success() {
-        let stderr = String::from_utf8_lossy(&process.stderr);
-        let diagnostic = stderr.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
-        anyhow::bail!("official {} runtime failed: {diagnostic}", kind.label());
+    if worker.is_none() {
+        let mut child = Command::new("/usr/bin/python3")
+            .args(["/app/reference_vectorize.py", "--worker"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .context("start official StarVector runtime")?;
+        *worker = Some(OfficialWorker {
+            input: child.stdin.take().context("worker stdin")?,
+            output: BufReader::new(child.stdout.take().context("worker stdout")?),
+            child,
+        });
     }
+    let exchange = (|| -> Result<serde_json::Value> {
+        let process = worker.as_mut().context("worker missing")?;
+        let request = serde_json::json!({
+            "image_path": input.path(), "output_path": output.path(), "model_path": model_dir,
+        });
+        writeln!(process.input, "{request}")?;
+        process.input.flush()?;
+        let mut response = String::new();
+        anyhow::ensure!(
+            process.output.read_line(&mut response)? > 0,
+            "model worker exited unexpectedly"
+        );
+        serde_json::from_str(&response).context("invalid worker response")
+    })();
+    let response = match exchange {
+        Ok(response) => response,
+        Err(error) => {
+            *worker = None;
+            return Err(error);
+        }
+    };
+    anyhow::ensure!(
+        response["ok"] == true,
+        "official {} runtime failed: {}",
+        kind.label(),
+        response["error"].as_str().unwrap_or("unknown worker error")
+    );
+    tracing::info!(
+        model = kind.label(),
+        cache_hit = response["cache_hit"].as_bool(),
+        load_seconds = response["load_seconds"].as_f64(),
+        generation_seconds = response["generation_seconds"].as_f64(),
+        "official model request completed"
+    );
     let raw = std::fs::read_to_string(output.path()).context("read official StarVector SVG")?;
     if let Ok(path) = std::env::var("VECTOR_DEBUG_RAW_OUTPUT") {
         let _ = std::fs::write(path, &raw);
@@ -200,14 +258,30 @@ fn validate_svg(raw: String, allow_tag_recovery: bool) -> Result<String> {
     // Such a document must not be reported as successful vectorization.
     let has_drawing = document.descendants().any(|node| {
         node.is_element()
-            && matches!(node.tag_name().name(),
-                "path" | "rect" | "circle" | "ellipse" | "line" |
-                "polyline" | "polygon" | "text" | "use")
-            && !node.ancestors().any(|parent| parent.is_element()
-                && matches!(parent.tag_name().name(),
-                    "defs" | "symbol" | "clipPath" | "mask" | "pattern" | "marker"))
+            && matches!(
+                node.tag_name().name(),
+                "path"
+                    | "rect"
+                    | "circle"
+                    | "ellipse"
+                    | "line"
+                    | "polyline"
+                    | "polygon"
+                    | "text"
+                    | "use"
+            )
+            && !node.ancestors().any(|parent| {
+                parent.is_element()
+                    && matches!(
+                        parent.tag_name().name(),
+                        "defs" | "symbol" | "clipPath" | "mask" | "pattern" | "marker"
+                    )
+            })
     });
-    anyhow::ensure!(has_drawing, "model output contains no drawable SVG elements");
+    anyhow::ensure!(
+        has_drawing,
+        "model output contains no drawable SVG elements"
+    );
     Ok(svg)
 }
 
@@ -332,9 +406,13 @@ mod tests {
         ] {
             assert!(validate_svg(raw.to_owned(), true).is_err(), "{raw}");
         }
-        assert!(validate_svg(
-            "<svg><defs><path id=\"p\" d=\"M0 0L10 10\"/></defs><use href=\"#p\"/></svg>".to_owned(),
-            false,
-        ).is_ok());
+        assert!(
+            validate_svg(
+                "<svg><defs><path id=\"p\" d=\"M0 0L10 10\"/></defs><use href=\"#p\"/></svg>"
+                    .to_owned(),
+                false,
+            )
+            .is_ok()
+        );
     }
 }

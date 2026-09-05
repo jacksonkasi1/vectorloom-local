@@ -14,7 +14,8 @@ const hardwareNote = document.querySelector('#hardware-note');
 const resultWarning = document.querySelector('#result-warning');
 
 let modelPoll;
-let selectedModel;
+let selectedModel = 'trace';
+let processing = false;
 loadModels();
 
 input.addEventListener('change', () => input.files[0] && process(input.files[0]));
@@ -27,6 +28,9 @@ input.addEventListener('change', () => input.files[0] && process(input.files[0])
 dropzone.addEventListener('drop', event => event.dataTransfer.files[0] && process(event.dataTransfer.files[0]));
 
 async function process(file) {
+  if (processing) return;
+  processing = true;
+  input.disabled = true;
   error.classList.add('hidden'); result.classList.add('hidden'); progress.classList.remove('hidden');
   const startedAt = Date.now();
   progressText.textContent = 'Building vectors… 0h 0m 0s';
@@ -37,9 +41,10 @@ async function process(file) {
   form.append('image', file);
   form.append('model', selectedModel || '8b');
   try {
-    const response = await fetch('/api/vectorize', { method: 'POST', body: form });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'Vectorization failed.');
+    const response = await fetch('/api/vectorize/jobs', { method: 'POST', body: form });
+    const accepted = await response.json();
+    if (!response.ok) throw new Error(accepted.error || 'Could not start conversion.');
+    const payload = await waitForJob(accepted.job_id);
     const blob = new Blob([payload.svg], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
     if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
@@ -51,8 +56,34 @@ async function process(file) {
   } catch (err) {
     error.textContent = err.message; error.classList.remove('hidden');
   } finally {
+    processing = false;
+    input.disabled = false;
     clearInterval(elapsedTimer);
     progress.classList.add('hidden');
+  }
+}
+
+async function waitForJob(jobId) {
+  let failures = 0;
+  while (true) {
+    let response;
+    try {
+      response = await fetch(`/api/vectorize/jobs/${encodeURIComponent(jobId)}`);
+    } catch (err) {
+      if (++failures > 5) throw new Error('Connection lost while checking conversion.');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      continue;
+    }
+    if (response.status >= 500 && ++failures <= 5) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      continue;
+    }
+    const job = await response.json();
+    if (!response.ok) throw new Error(job.error || 'Could not check conversion.');
+    failures = 0;
+    if (job.state === 'complete') return job.result;
+    if (job.state === 'failed') throw new Error(job.error || 'Conversion failed.');
+    await new Promise(resolve => setTimeout(resolve, 1500));
   }
 }
 
@@ -71,19 +102,24 @@ async function loadModels() {
 function renderModels(catalog) {
   device.textContent = catalog.runtime_device;
   hardwareNote.textContent = catalog.hardware_note;
-  const selected = catalog.models.find(model => model.selected);
+  const selected = catalog.models.find(model => model.id === selectedModel);
   selectedModel ||= selected?.id || '8b';
-  runtime.textContent = selected?.installed
+  runtime.textContent = selectedModel === 'trace' ? 'Direct tracing · preserves source shapes' : selected?.installed
     ? `${selected.label} · ${catalog.runtime_device}`
     : `${selected?.label || 'Model'} selected · automatic tracer available`;
-  models.replaceChildren(...catalog.models.map(model => {
+  const traceCard = document.createElement('article');
+  traceCard.className = `model-card${selectedModel === 'trace' ? ' selected' : ''}`;
+  traceCard.innerHTML = `<div class="model-name"><strong>Direct tracing</strong><span>For logos</span></div>
+    <p>Preserves lettering and source shapes. No AI model loading.</p>
+    <div class="model-actions"><button data-select="trace" ${selectedModel === 'trace' ? 'disabled' : ''}>${selectedModel === 'trace' ? 'Selected' : 'Use tracing'}</button></div>`;
+  models.replaceChildren(traceCard, ...catalog.models.map(model => {
     const card = document.createElement('article');
     const isSelected = model.id === selectedModel;
     card.className = `model-card${isSelected ? ' selected' : ''}`;
     const percent = Math.min(100, Math.round((model.downloaded_bytes / model.total_bytes) * 100));
     card.innerHTML = `
-      <div class="model-name"><strong>${model.label}</strong><span>${model.id === '8b' ? 'Best quality' : 'Faster'}</span></div>
-      <p>${formatBytes(model.total_bytes)} checkpoint · ${model.installed ? 'Ready locally' : model.phase === 'downloading' ? `${percent}% downloaded` : 'Not downloaded'}</p>
+      <div class="model-name"><strong>${model.label}</strong><span>AI generation</span></div>
+      <p>${formatBytes(model.total_bytes)} checkpoint · ${model.installed ? 'Installed' : model.phase === 'downloading' ? `${percent}% downloaded` : 'Not downloaded'}. May change lettering or fine details.</p>
       <div class="model-progress"><span style="width:${model.installed ? 100 : percent}%"></span></div>
       <div class="model-actions">
         <button data-select="${model.id}" ${isSelected || !model.installed ? 'disabled' : ''}>${isSelected ? 'Selected' : model.installed ? 'Use model' : 'Preparing…'}</button>

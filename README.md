@@ -1,17 +1,17 @@
 # VectorLoom
 
-Image vectorization for Apple Silicon and hosted NVIDIA GPUs. The UI is deliberately simple: upload a PNG, JPG, or WebP; choose StarVector 1B or 8B; preview and download the SVG.
+Image vectorization for Apple Silicon and hosted NVIDIA GPUs. Upload a PNG, JPG, or WebP; choose direct tracing (the default for logos), StarVector 1B, or StarVector 8B; preview and download the SVG.
 
 ## Hosted GPU deployment
 
-The included Docker image compiles Candle with CUDA and serves both the browser UI and HTTP API. It automatically installs both model checkpoints into `VECTOR_MODEL_DIR` (default `/models`) before accepting traffic. Mount persistent storage there: the two models need about 20 GB together.
+The included Docker image serves both the browser UI and HTTP API. Its startup script downloads missing model checkpoints into `VECTOR_MODEL_DIR` (default `/models`) in the background. Mount persistent storage there: the two models need about 20 GB together. Direct tracing does not require either checkpoint.
 
 ```sh
 docker build -t vectorloom:cuda .
-docker run --gpus all -p 3000:3000 -v vectorloom-models:/models vectorloom:cuda
+docker run --gpus all -p 3000:3000 -v vectorloom-models:/models vectorloom:cuda /app/docker-entrypoint.sh
 ```
 
-See [deploy/README.md](deploy/README.md) for Modal deployment. The image is designed for an A100 80 GB so either model can be selected safely.
+See [deploy/README.md](deploy/README.md) for Modal deployment. Modal prefers an L40S (48 GB), with larger compatible GPU pools as capacity fallbacks.
 
 ## Install the macOS app
 
@@ -38,10 +38,10 @@ On macOS, double-click `VectorLoom.command` for the same release-mode startup.
 
 The model panel downloads official, revision-pinned Hugging Face checkpoints directly to `models/` with resumable partial files:
 
-- StarVector 1B: 4.8 GiB, the practical debugging/faster option.
-- StarVector 8B: 14.0 GiB, the default quality option for the intended 64 GB Apple Silicon machine.
+- StarVector 1B: 4.8 GiB checkpoint.
+- StarVector 8B: 14.0 GiB checkpoint.
 
-Selecting a model is remembered across restarts. When there is no saved choice, an already-downloaded 1B checkpoint is preferred over an unavailable 8B checkpoint. Selecting a downloaded model makes uploads use real in-process Candle inference; the loaded model is cached between requests.
+The browser starts with direct tracing selected. Selecting an AI model applies to that browser's subsequent uploads, without changing other users' choices. The API also accepts `model=trace`, `model=1b`, or `model=8b` with each upload. If the API caller omits the model, the server uses its configured AI default.
 
 Images and generated SVGs are processed in memory and are not persisted. Local builds bind to `127.0.0.1` by default; hosted containers set `VECTOR_BIND=0.0.0.0`.
 
@@ -49,10 +49,13 @@ Images and generated SVGs are processed in memory and are not persisted. Local b
 
 - `VECTOR_MODEL=8b` and `VECTOR_MODEL=1b` can override the saved model choice at startup.
 - The included runtime uses the Metal-enabled `jacksonkasi1/starvector-rs` fork for real in-process 1B/8B inference and validates generated XML before download.
+- Hosted CUDA containers use the official Transformers implementation in a persistent worker (`VECTOR_OFFICIAL_RUNTIME=1`). The 1B decoder is constructed from the installed public checkpoint and its shared output weights are re-tied after loading.
 - Apple Silicon selects Candle Metal/BF16 automatically. Intel Macs use CPU/F32 with Apple's Accelerate framework.
 - If a checkpoint is missing or inference fails, VTracer's Rust spline/cutout pipeline remains available and the UI shows the fallback reason.
 
-StarVector generates SVG text one token at a time. The first conversion also loads several gigabytes of weights; later conversions reuse the loaded model and are substantially faster. The UI reports the full wait as a live `h m s` timer. For development-only bounded runs, `VECTOR_MAX_TOKENS=512 cargo run --release` limits generation, but too small a value can truncate complex SVGs and trigger the visible tracer fallback.
+StarVector generates SVG text one token at a time. The first AI conversion loads several gigabytes of weights; consecutive conversions with the same model reuse those weights while the server stays warm. Switching models or a server cold start requires loading again. The UI submits asynchronous jobs and polls their status, displaying the full wait as a live `h m s` timer. `VECTOR_MAX_TOKENS` limits the native Rust runtime only.
+
+Direct tracing skips model inference and preserves small regions and finer curves for images up to 512 pixels on their longest edge. This improves low-resolution logo lettering but cannot reconstruct missing source detail. Neither AI model is guaranteed to reproduce a complex logo accurately, even when its XML is valid. These changes do not train or fine-tune model weights.
 
 See [STARVECTOR_RESEARCH.md](STARVECTOR_RESEARCH.md) for the investigation and implementation boundary.
 
@@ -61,6 +64,7 @@ See [STARVECTOR_RESEARCH.md](STARVECTOR_RESEARCH.md) for the investigation and i
 ```sh
 cargo test
 cargo clippy --all-targets -- -D warnings
+node --test web/app.test.cjs
 ```
 
 ## License

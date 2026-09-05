@@ -180,12 +180,16 @@ async fn vectorize_upload(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let (bytes, kind) = read_vectorize_request(&state, &mut multipart).await?;
+    let (bytes, kind, trace_only) = read_vectorize_request(&state, &mut multipart).await?;
     let installed = state.models.is_installed(kind).await;
     let model_dir = state.models.model_dir(kind);
     let runtime = Arc::clone(&state.starvector);
     let result = tokio::task::spawn_blocking(move || {
-        vectorize_with_model(runtime, installed, model_dir, kind, bytes)
+        if trace_only {
+            vectorize(&bytes)
+        } else {
+            vectorize_with_model(runtime, installed, model_dir, kind, bytes)
+        }
     })
     .await
     .map_err(api_error)?
@@ -197,7 +201,7 @@ async fn start_vectorize_job(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<JobAccepted>), (StatusCode, Json<ApiError>)> {
-    let (bytes, kind) = read_vectorize_request(&state, &mut multipart).await?;
+    let (bytes, kind, trace_only) = read_vectorize_request(&state, &mut multipart).await?;
     let installed = state.models.is_installed(kind).await;
     let model_dir = state.models.model_dir(kind);
     let runtime = Arc::clone(&state.starvector);
@@ -217,7 +221,12 @@ async fn start_vectorize_job(
     let jobs = Arc::clone(&state.jobs);
     let result_job_id = job_id.clone();
     tokio::task::spawn_blocking(move || {
-        let job = match vectorize_with_model(runtime, installed, model_dir, kind, bytes) {
+        let output = if trace_only {
+            vectorize(&bytes)
+        } else {
+            vectorize_with_model(runtime, installed, model_dir, kind, bytes)
+        };
+        let job = match output {
             Ok(result) => VectorJob::Complete { result },
             Err(error) => VectorJob::Failed {
                 error: format!("{error:#}"),
@@ -252,7 +261,7 @@ async fn vectorize_job(
 async fn read_vectorize_request(
     state: &AppState,
     multipart: &mut Multipart,
-) -> Result<(axum::body::Bytes, ModelKind), (StatusCode, Json<ApiError>)> {
+) -> Result<(axum::body::Bytes, ModelKind, bool), (StatusCode, Json<ApiError>)> {
     let mut uploaded_image = None;
     let mut requested_model = None;
     while let Some(field) = multipart.next_field().await.map_err(api_error)? {
@@ -275,12 +284,14 @@ async fn read_vectorize_request(
     ) {
         return Err(invalid("Only PNG, JPEG, and WebP files are accepted."));
     }
+    let trace_only = requested_model.as_deref() == Some("trace");
     let kind = requested_model
         .as_deref()
+        .filter(|value| *value != "trace")
         .map(parse_model)
         .transpose()?
         .unwrap_or_else(|| state.models.selected());
-    Ok((bytes, kind))
+    Ok((bytes, kind, trace_only))
 }
 
 fn vectorize_with_model(

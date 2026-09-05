@@ -2,11 +2,15 @@ import sys
 import os
 import json
 import time
+import gc
+import contextlib
 
 import torch
 from PIL import Image
 from huggingface_hub import hf_hub_download
 from transformers import AutoModelForCausalLM
+
+_cached = None
 
 
 def use_local_1b_decoder(model_path):
@@ -35,6 +39,7 @@ def use_local_1b_decoder(model_path):
 
 
 def main(image_path, output_path, model_path):
+    global _cached
     started = time.monotonic()
     precision = os.environ.get("VECTOR_REFERENCE_PRECISION", "float16")
     if precision not in ("float16", "bfloat16"):
@@ -44,20 +49,29 @@ def main(image_path, output_path, model_path):
         config = json.load(source)
     is_8b = config["starcoder_model_name"] == "bigcode/starcoder2-7b"
     repository = "starvector/starvector-8b-im2svg" if is_8b else "starvector/starvector-1b-im2svg"
-    hf_hub_download(repository, "starvector_arch.py", local_dir=model_path)
-    if not is_8b:
-        use_local_1b_decoder(model_path)
-    model, loading_info = AutoModelForCausalLM.from_pretrained(
-        model_path, torch_dtype=dtype, trust_remote_code=True,
-        output_loading_info=True,
-    )
-    if not is_8b:
-        # The public 1B safetensors index stores wte.weight only. Re-establish
-        # the decoder's shared output head after the outer model loads it.
-        model.model.svg_transformer.transformer.tie_weights()
-    model = model.cuda().eval()
+    key = (os.path.realpath(model_path), precision)
+    cache_hit = _cached is not None and _cached[0] == key
+    if not cache_hit:
+        _cached = None
+        gc.collect()
+        torch.cuda.empty_cache()
+        hf_hub_download(repository, "starvector_arch.py", local_dir=model_path)
+        if not is_8b:
+            use_local_1b_decoder(model_path)
+        model, loading_info = AutoModelForCausalLM.from_pretrained(
+            model_path, torch_dtype=dtype, trust_remote_code=True,
+            output_loading_info=True,
+        )
+        if not is_8b:
+            # The public checkpoint stores the tied embedding weights once.
+            model.model.svg_transformer.transformer.tie_weights()
+        model = model.cuda().eval()
+        _cached = (key, model, loading_info)
+    else:
+        _, model, loading_info = _cached
     diagnostic_path = os.environ.get("VECTOR_DEBUG_RAW_OUTPUT")
-    diagnostics = {"loading_info": loading_info, "load_seconds": time.monotonic() - started}
+    diagnostics = {"loading_info": loading_info, "load_seconds": time.monotonic() - started,
+                   "cache_hit": cache_hit}
     if not is_8b:
         decoder = model.model.svg_transformer.transformer
         diagnostics["output_head_tied"] = (
@@ -95,7 +109,28 @@ def main(image_path, output_path, model_path):
     save_diagnostics()
     with open(output_path, "w", encoding="utf-8") as output:
         output.write(svg)
+    return diagnostics
+
+
+def worker():
+    # Model-library output goes to stderr; stdout is a JSON-lines protocol.
+    protocol = sys.stdout
+    for line in sys.stdin:
+        try:
+            request = json.loads(line)
+            with contextlib.redirect_stdout(sys.stderr):
+                diagnostics = main(request["image_path"], request["output_path"], request["model_path"])
+            response = {"ok": True, "cache_hit": diagnostics["cache_hit"],
+                        "load_seconds": diagnostics["load_seconds"],
+                        "generation_seconds": diagnostics["generation_seconds"]}
+        except Exception as error:
+            response = {"ok": False, "error": str(error)}
+        protocol.write(json.dumps(response) + "\n")
+        protocol.flush()
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    if sys.argv[1:] == ["--worker"]:
+        worker()
+    else:
+        main(*sys.argv[1:])

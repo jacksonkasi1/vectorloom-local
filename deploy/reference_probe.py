@@ -22,14 +22,17 @@ volume = modal.Volume.from_name("vectorloom-models")
 
 @app.function(image=image, gpu=["L40S", "A100-80GB", "H100", "RTX-PRO-6000"],
               volumes={"/models": volume}, timeout=1800)
-def run(precision: str = "float16", model_kind: str = "8b"):
+def run(precision: str = "float16", model_kind: str = "8b", repeats: int = 1):
+    if not 1 <= repeats <= 3:
+        raise ValueError("Use between one and three requests")
     if model_kind not in ("1b", "8b"):
         raise ValueError("Unsupported model")
     if precision not in ("float16", "bfloat16"):
         raise ValueError("Unsupported reference precision")
     directory = Path("/models/probe/runs") / uuid.uuid4().hex
     directory.mkdir(parents=True)
-    manifest = {"state": "running", "started_at": time.time(), "precision": precision, "model": model_kind}
+    manifest = {"state": "running", "started_at": time.time(), "precision": precision,
+                "model": model_kind, "repeats": repeats}
     def save():
         (directory / "manifest.json").write_text(json.dumps(manifest))
         volume.commit()
@@ -39,12 +42,17 @@ def run(precision: str = "float16", model_kind: str = "8b"):
                VECTOR_REFERENCE_PRECISION=precision)
     try:
         with (directory / "runtime.log").open("w") as log:
-            process = subprocess.run([
-                "/usr/bin/python3", "/probe/reference.py", "/probe/input.png",
-                str(directory / "raw.svg"), f"/models/starvector-{model_kind}-im2svg",
-            ], env=env, stdout=log, stderr=log, timeout=1700)
-        manifest.update(state="completed" if process.returncode == 0 else "failed",
-                        returncode=process.returncode)
+            requests = "".join(json.dumps({"image_path": "/probe/input.png",
+                "output_path": str(directory / f"result-{index}.svg"),
+                "model_path": f"/models/starvector-{model_kind}-im2svg"}) + "\n"
+                for index in range(repeats))
+            process = subprocess.run(["/usr/bin/python3", "/probe/reference.py", "--worker"],
+                input=requests, text=True, env=env, stdout=subprocess.PIPE, stderr=log, timeout=1700)
+        (directory / "responses.jsonl").write_text(process.stdout)
+        responses = [json.loads(line) for line in process.stdout.splitlines()]
+        success = process.returncode == 0 and len(responses) == repeats and all(r.get("ok") for r in responses)
+        manifest.update(state="completed" if success else "failed",
+                        returncode=process.returncode, responses=responses)
     except Exception as error:
         manifest.update(state="failed", error=str(error))
         raise
