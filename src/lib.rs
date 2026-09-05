@@ -78,6 +78,13 @@ pub fn vectorize(bytes: &[u8]) -> Result<VectorizedImage> {
     config.hierarchical = Hierarchical::Cutout;
     config.max_colors = Some(max_colors);
     config.simplify = Some(if max_colors <= 8 { 0.8 } else { 1.35 });
+    // At icon resolution, tiny regions and subpixel curve differences often
+    // represent lettering or intentional strokes, rather than image noise.
+    if width.max(height) <= 512 {
+        config.filter_speckle = 0;
+        config.length_threshold = 1.0;
+        config.simplify = Some(0.2);
+    }
     config.optimize = 2;
     let svg = config
         .build()
