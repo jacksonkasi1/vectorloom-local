@@ -51,9 +51,18 @@ def main(image_path, output_path, model_path):
         model_path, torch_dtype=dtype, trust_remote_code=True,
         output_loading_info=True,
     )
+    if not is_8b:
+        # The public 1B safetensors index stores wte.weight only. Re-establish
+        # the decoder's shared output head after the outer model loads it.
+        model.model.svg_transformer.transformer.tie_weights()
     model = model.cuda().eval()
     diagnostic_path = os.environ.get("VECTOR_DEBUG_RAW_OUTPUT")
     diagnostics = {"loading_info": loading_info, "load_seconds": time.monotonic() - started}
+    if not is_8b:
+        decoder = model.model.svg_transformer.transformer
+        diagnostics["output_head_tied"] = (
+            decoder.lm_head.weight.data_ptr() == decoder.transformer.wte.weight.data_ptr()
+        )
     def save_diagnostics():
         if diagnostic_path:
             with open(diagnostic_path + ".json", "w") as output:
