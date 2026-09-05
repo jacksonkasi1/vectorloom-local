@@ -11,12 +11,19 @@ def main(image_path, output_path, model_path):
     model = AutoModelForCausalLM.from_pretrained(
         model_path, torch_dtype=torch.float16, trust_remote_code=True
     ).cuda().eval()
-    processor = model.model.processor
-    # SigLIP expects a three-channel image.  Flatten transparent uploads onto
-    # RGB before preprocessing so PNG logos with an alpha channel work too.
-    image = processor(Image.open(image_path).convert("RGB"), return_tensors="pt")["pixel_values"].cuda()
+    # Keep the same preprocessing path and generation controls used by the
+    # upstream StarVector 8B quickstart.  This matters for transparent logos
+    # and avoids the model immediately closing an otherwise empty canvas.
+    image = model.process_images([Image.open(image_path).convert("RGB")])[0]
+    image = image.to(torch.float16).cuda()
     with torch.inference_mode():
-        svg = model.generate_im2svg({"image": image}, max_length=4000)[0]
+        svg = model.generate_im2svg(
+            {"image": image},
+            max_length=4000,
+            temperature=1.5,
+            length_penalty=-1,
+            repetition_penalty=3.1,
+        )[0]
     with open(output_path, "w", encoding="utf-8") as output:
         output.write(svg)
 
