@@ -15,8 +15,6 @@ def main(image_path, output_path, model_path):
     # SigLIP expects a three-channel image.  Flatten transparent uploads onto
     # RGB before preprocessing so PNG logos with an alpha channel work too.
     image = processor(Image.open(image_path).convert("RGB"), return_tensors="pt")["pixel_values"].cuda()
-    if image.shape[0] == 1:
-        image = image.squeeze(0)
     with torch.inference_mode():
         svg = model.generate_im2svg({"image": image}, max_length=4000)[0]
     with open(output_path, "w", encoding="utf-8") as output:
