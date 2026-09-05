@@ -150,6 +150,9 @@ fn generate_with_official_runtime(
         anyhow::bail!("official StarVector 8B runtime failed: {diagnostic}");
     }
     let raw = std::fs::read_to_string(output.path()).context("read official StarVector SVG")?;
+    if let Ok(path) = std::env::var("VECTOR_DEBUG_RAW_OUTPUT") {
+        let _ = std::fs::write(path, &raw);
+    }
     Ok(StarVectorResult {
         svg: validate_svg(raw, true)?,
         elapsed_ms: started.elapsed().as_millis(),

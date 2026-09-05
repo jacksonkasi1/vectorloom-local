@@ -11,16 +11,23 @@ def main(image_path, output_path, model_path):
     model = AutoModelForCausalLM.from_pretrained(
         model_path, torch_dtype=torch.float16, trust_remote_code=True
     ).cuda().eval()
-    # Keep the upstream preprocessing and generation invocation exactly as
-    # published by StarVector.  In particular, the model's defaults are
-    # calibrated for its SVG token vocabulary; overriding sampling controls
-    # can produce a syntactically plausible prefix followed by invalid tokens.
+    # Match the released 8B image-to-SVG evaluation configuration.  The
+    # library defaults are intentionally generic (two beams, temperature 1.0,
+    # and a 30-token limit), while the published checkpoint is evaluated with
+    # nucleus sampling and the controls below.
     image = model.process_images([Image.open(image_path).convert("RGB")])[0]
     image = image.to(torch.float16).cuda()
     with torch.inference_mode():
         svg = model.generate_im2svg(
             {"image": image},
-            max_length=4000,
+            max_length=16000,
+            min_length=10,
+            num_beams=1,
+            use_nucleus_sampling=True,
+            top_p=0.95,
+            temperature=0.7,
+            repetition_penalty=1.0,
+            length_penalty=0.5,
         )[0]
     with open(output_path, "w", encoding="utf-8") as output:
         output.write(svg)
