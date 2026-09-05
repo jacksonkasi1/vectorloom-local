@@ -11,18 +11,16 @@ def main(image_path, output_path, model_path):
     model = AutoModelForCausalLM.from_pretrained(
         model_path, torch_dtype=torch.float16, trust_remote_code=True
     ).cuda().eval()
-    # Keep the same preprocessing path and generation controls used by the
-    # upstream StarVector 8B quickstart.  This matters for transparent logos
-    # and avoids the model immediately closing an otherwise empty canvas.
+    # Keep the upstream preprocessing and generation invocation exactly as
+    # published by StarVector.  In particular, the model's defaults are
+    # calibrated for its SVG token vocabulary; overriding sampling controls
+    # can produce a syntactically plausible prefix followed by invalid tokens.
     image = model.process_images([Image.open(image_path).convert("RGB")])[0]
     image = image.to(torch.float16).cuda()
     with torch.inference_mode():
         svg = model.generate_im2svg(
             {"image": image},
             max_length=4000,
-            temperature=1.5,
-            length_penalty=-1,
-            repetition_penalty=3.1,
         )[0]
     with open(output_path, "w", encoding="utf-8") as output:
         output.write(svg)
