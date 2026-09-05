@@ -190,6 +190,18 @@ fn validate_svg(raw: String, allow_tag_recovery: bool) -> Result<String> {
         document.root_element().tag_name().name() == "svg",
         "model output root is not SVG"
     );
+    // XML repair may leave only an empty canvas or reusable definitions.
+    // Such a document must not be reported as successful vectorization.
+    let has_drawing = document.descendants().any(|node| {
+        node.is_element()
+            && matches!(node.tag_name().name(),
+                "path" | "rect" | "circle" | "ellipse" | "line" |
+                "polyline" | "polygon" | "text" | "use")
+            && !node.ancestors().any(|parent| parent.is_element()
+                && matches!(parent.tag_name().name(),
+                    "defs" | "symbol" | "clipPath" | "mask" | "pattern" | "marker"))
+    });
+    anyhow::ensure!(has_drawing, "model output contains no drawable SVG elements");
     Ok(svg)
 }
 
@@ -302,5 +314,21 @@ mod tests {
     #[test]
     fn rejects_incomplete_model_svg() {
         assert!(validate_svg("<svg><path d=\"M0 0\"/>".to_owned(), false).is_err());
+    }
+
+    #[test]
+    fn rejects_empty_canvas_and_unused_definitions() {
+        for raw in [
+            "<svg/>",
+            "<svg><defs><style/></defs></svg>",
+            "<svg><defs><path id=\"p\" d=\"M0 0L10 10\"/></defs></svg>",
+            "<svg><clipPath id=\"c\"><rect width=\"10\" height=\"10\"/></clipPath></svg>",
+        ] {
+            assert!(validate_svg(raw.to_owned(), true).is_err(), "{raw}");
+        }
+        assert!(validate_svg(
+            "<svg><defs><path id=\"p\" d=\"M0 0L10 10\"/></defs><use href=\"#p\"/></svg>".to_owned(),
+            false,
+        ).is_ok());
     }
 }
