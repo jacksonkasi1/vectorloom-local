@@ -15,7 +15,11 @@ def main(image_path, output_path, model_path):
     if precision not in ("float16", "bfloat16"):
         raise ValueError("Unsupported reference precision")
     dtype = getattr(torch, precision)
-    hf_hub_download("starvector/starvector-8b-im2svg", "starvector_arch.py", local_dir=model_path)
+    with open(os.path.join(model_path, "config.json")) as source:
+        config = json.load(source)
+    is_8b = config["starcoder_model_name"] == "bigcode/starcoder2-7b"
+    repository = "starvector/starvector-8b-im2svg" if is_8b else "starvector/starvector-1b-im2svg"
+    hf_hub_download(repository, "starvector_arch.py", local_dir=model_path)
     model, loading_info = AutoModelForCausalLM.from_pretrained(
         model_path, torch_dtype=dtype, trust_remote_code=True,
         output_loading_info=True,
@@ -41,14 +45,14 @@ def main(image_path, output_path, model_path):
     with torch.inference_mode():
         svg = model.generate_im2svg(
             {"image": image},
-            max_length=16000,
+            max_length=16000 if is_8b else 7800,
             min_length=10,
             num_beams=1,
             use_nucleus_sampling=True,
             top_p=0.95,
-            temperature=0.7,
+            temperature=0.7 if is_8b else 0.2,
             repetition_penalty=1.0,
-            length_penalty=0.5,
+            length_penalty=0.5 if is_8b else 1.0,
         )[0]
     diagnostics.update(generation_seconds=time.monotonic() - generation_started,
                        output_characters=len(svg))
