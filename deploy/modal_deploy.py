@@ -5,6 +5,9 @@ The first deployment downloads about 20 GB of public StarVector checkpoints
 into the persistent `vectorloom-models` volume before the site becomes ready.
 """
 import os
+import json
+import hashlib
+import uuid
 import subprocess
 import time
 import urllib.request
@@ -47,10 +50,22 @@ def vectorloom():
 )
 def quality_probe():
     """Run the supplied badge image entirely in Modal and preserve its response."""
+    run_id = uuid.uuid4().hex
+    result_dir = f"/models/probe/runs/{run_id}"
+    os.makedirs(result_dir, exist_ok=True)
+    manifest = {"run_id": run_id, "state": "running", "started_at": time.time()}
+
+    def save_manifest():
+        with open(f"{result_dir}/manifest.json", "w") as output:
+            json.dump(manifest, output)
+        models.commit()
+
+    save_manifest()
+    print(f"Quality probe {run_id}: results in {result_dir}", flush=True)
     os.environ["VECTOR_AUTO_DOWNLOAD"] = "all"
     os.environ["VECTOR_MODEL"] = "8b"
     os.environ["VECTOR_OFFICIAL_8B_RUNTIME"] = "1"
-    os.environ["VECTOR_DEBUG_RAW_OUTPUT"] = "/models/probe/raw-starvector-output.txt"
+    os.environ["VECTOR_DEBUG_RAW_OUTPUT"] = f"{result_dir}/raw-starvector-output.txt"
     service = subprocess.Popen(["/app/vectorloom-local"])
     try:
         for _ in range(60):
@@ -62,6 +77,7 @@ def quality_probe():
         else:
             raise RuntimeError("VectorLoom did not start")
         image = open("/models/probe/favicon_new.png", "rb").read()
+        manifest["input_sha256"] = hashlib.sha256(image).hexdigest()
         boundary = "VectorLoomProbeBoundary"
         body = b"".join([
             f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"favicon_new.png\"\r\nContent-Type: image/png\r\n\r\n".encode(),
@@ -75,9 +91,14 @@ def quality_probe():
             method="POST",
         )
         response = urllib.request.urlopen(request, timeout=3600).read()
-        os.makedirs("/models/probe", exist_ok=True)
-        open("/models/probe/result.json", "wb").write(response)
-        models.commit()
-        return {"bytes": len(response)}
+        with open(f"{result_dir}/result.json", "wb") as output:
+            output.write(response)
+        manifest.update(state="completed", finished_at=time.time(), response_sha256=hashlib.sha256(response).hexdigest())
+        save_manifest()
+        return {"run_id": run_id, "result_dir": result_dir, "bytes": len(response)}
+    except Exception as error:
+        manifest.update(state="failed", finished_at=time.time(), error=str(error))
+        save_manifest()
+        raise
     finally:
         service.terminate()
