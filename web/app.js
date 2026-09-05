@@ -16,6 +16,14 @@ const resultWarning = document.querySelector('#result-warning');
 let modelPoll;
 let selectedModel = 'trace';
 let processing = false;
+let currentSVG;
+download.addEventListener('click', event => {
+  const nativeSave = globalThis.webkit?.messageHandlers?.saveSVG;
+  if (nativeSave && currentSVG) {
+    event.preventDefault();
+    nativeSave.postMessage(currentSVG);
+  }
+});
 loadModels();
 
 input.addEventListener('change', () => input.files[0] && process(input.files[0]));
@@ -45,6 +53,7 @@ async function process(file) {
     const accepted = await response.json();
     if (!response.ok) throw new Error(accepted.error || 'Could not start conversion.');
     const payload = await waitForJob(accepted.job_id);
+    currentSVG = payload.svg;
     const blob = new Blob([payload.svg], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
     if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
@@ -123,11 +132,22 @@ function renderModels(catalog) {
       <div class="model-progress"><span style="width:${model.installed ? 100 : percent}%"></span></div>
       <div class="model-actions">
         <button data-select="${model.id}" ${isSelected || !model.installed ? 'disabled' : ''}>${isSelected ? 'Selected' : model.installed ? 'Use model' : 'Preparing…'}</button>
+        ${catalog.model_admin_enabled && !model.installed ? `<button data-download="${model.id}" ${model.phase === 'downloading' ? 'disabled' : ''}>${model.phase === 'downloading' ? 'Downloading…' : 'Download model'}</button>` : ''}
       </div>
       ${model.message ? `<small>${escapeHtml(model.message)}</small>` : ''}`;
     return card;
   }));
   models.querySelectorAll('[data-select]').forEach(button => button.addEventListener('click', () => selectModel(button.dataset.select)));
+  models.querySelectorAll('[data-download]').forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/models/${button.dataset.download}/download`, { method: 'POST' });
+      if (!response.ok) throw new Error((await response.json()).error || 'Could not start download.');
+      await loadModels();
+    } catch (err) {
+      error.textContent = err.message; error.classList.remove('hidden'); button.disabled = false;
+    }
+  }));
 }
 
 function selectModel(model) {

@@ -9,7 +9,7 @@ function setup(handler) {
     const classes = new Set(['hidden']);
     return { src: '', textContent: '', innerHTML: '', disabled: false,
       classList: { add: x => classes.add(x), remove: x => classes.delete(x), contains: x => classes.has(x) },
-      addEventListener() {}, querySelectorAll: () => [],
+      handlers: {}, addEventListener(name, handler) { this.handlers[name] = handler; }, querySelectorAll: () => [],
       replaceChildren(...children) { this.children = children; } };
   }
   const context = vm.createContext({
@@ -89,4 +89,25 @@ test('failed jobs show the reason and re-enable upload', async () => {
 test('repeated polling errors stop instead of looping forever', async () => {
   const { context } = setup(async () => { throw new Error('offline'); });
   await assert.rejects(context.waitForJob('test'), /Connection lost/);
+});
+
+test('Mac download sends SVG text to the native save panel', async () => {
+  const { context, elements } = setup(async (url, options) => options
+    ? response({ job_id: 'native' }, 202) : response({ state: 'complete', result }));
+  let saved;
+  let prevented = false;
+  context.webkit = { messageHandlers: { saveSVG: { postMessage: svg => { saved = svg; } } } };
+  await context.process(new Blob(['test']));
+  elements.get('#download').handlers.click({ preventDefault() { prevented = true; } });
+  assert.equal(saved, result.svg);
+  assert.equal(prevented, true);
+});
+
+test('manual model downloads appear only when local administration is enabled', () => {
+  const { context, elements } = setup(async () => response({}));
+  const catalog = { models: [{ id: '1b', label: '1B', installed: false, total_bytes: 1 }] };
+  context.renderModels(catalog);
+  assert.equal(elements.get('#models').children[1].innerHTML.includes('data-download='), false);
+  context.renderModels({ ...catalog, model_admin_enabled: true });
+  assert.equal(elements.get('#models').children[1].innerHTML.includes('data-download="1b"'), true);
 });

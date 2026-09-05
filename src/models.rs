@@ -207,6 +207,7 @@ pub struct ModelInfo {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ModelCatalog {
+    pub model_admin_enabled: bool,
     pub models: Vec<ModelInfo>,
     pub runtime_device: &'static str,
     pub hardware_note: &'static str,
@@ -340,6 +341,7 @@ impl ModelManager {
             });
         }
         ModelCatalog {
+            model_admin_enabled: std::env::var_os("VECTOR_ENABLE_MODEL_ADMIN").is_some(),
             models,
             runtime_device: runtime_device_label(),
             hardware_note: if cfg!(feature = "cuda") {

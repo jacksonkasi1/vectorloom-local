@@ -106,9 +106,12 @@ async fn main() {
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::very_permissive());
     let app = if std::env::var_os("VECTOR_ENABLE_MODEL_ADMIN").is_some() {
-        app.route("/api/models/select", post(select_model))
+        let admin = Router::new()
+            .route("/api/models/select", post(select_model))
             .route("/api/models/{model}/download", post(download_model))
             .route("/api/models/{model}", delete(delete_model))
+            .route_layer(axum::middleware::from_fn(local_admin_origin));
+        app.merge(admin)
     } else {
         app
     }
@@ -139,6 +142,23 @@ async fn health() -> Json<HealthResponse> {
 
 async fn models(State(state): State<AppState>) -> Json<ModelCatalog> {
     Json(state.models.catalog().await)
+}
+
+async fn local_admin_origin(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let port = std::env::var("VECTOR_PORT").unwrap_or_else(|_| "3000".to_owned());
+    let expected = format!("http://127.0.0.1:{port}");
+    if request
+        .headers()
+        .get("origin")
+        .and_then(|value| value.to_str().ok())
+        != Some(expected.as_str())
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    next.run(request).await
 }
 
 async fn select_model(

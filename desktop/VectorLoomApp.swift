@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var server: Process?
@@ -30,8 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     private func createWindow() {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        configuration.userContentController.add(self, name: "saveSVG")
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
         webView.loadHTMLString("<style>body{font:14px -apple-system;padding:40px;color:#34443a;background:#f2f1e9}</style>Starting VectorLoom…", baseURL: nil)
 
@@ -63,6 +65,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             process.currentDirectoryURL = resources
             var environment = ProcessInfo.processInfo.environment
             environment["VECTOR_PORT"] = "32145"
+            environment["VECTOR_BIND"] = "127.0.0.1"
+            environment["VECTOR_ENABLE_MODEL_ADMIN"] = "1"
+            environment.removeValue(forKey: "VECTOR_OFFICIAL_RUNTIME")
+            environment.removeValue(forKey: "VECTOR_OFFICIAL_8B_RUNTIME")
             environment["VECTOR_MODEL_DIR"] = models.path
             process.environment = environment
             process.standardOutput = FileHandle.nullDevice
@@ -147,6 +153,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         alert.informativeText = detail
         alert.alertStyle = .warning
         alert.beginSheetModal(for: window)
+    }
+
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.allowedFileTypes = ["png", "jpg", "jpeg", "webp"]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.beginSheetModal(for: window) { response in
+            completionHandler(response == .OK ? panel.urls : nil)
+        }
+    }
+
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        guard message.name == "saveSVG", message.frameInfo.isMainFrame,
+              message.frameInfo.securityOrigin.host == "127.0.0.1",
+              message.frameInfo.securityOrigin.port == 32145,
+              let svg = message.body as? String else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "vectorloom.svg"
+        panel.allowedFileTypes = ["svg"]
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let destination = panel.url else { return }
+            do { try svg.write(to: destination, atomically: true, encoding: .utf8) }
+            catch { self?.showAlert("Could not save SVG", detail: error.localizedDescription) }
+        }
     }
 }
 
