@@ -16,7 +16,7 @@ import modal
 app = modal.App("vectorloom-reference-probe")
 image = (modal.Image.from_id(os.environ["VECTOR_PROBE_IMAGE_ID"])
          .add_local_file(str(Path(__file__).resolve().parents[1] / "reference_vectorize.py"), "/probe/reference.py")
-         .add_local_file(os.environ["VECTOR_PROBE_INPUT"], "/probe/input.png"))
+         .add_local_file(os.environ["VECTOR_PROBE_INPUT"], "/probe/input.png")) if modal.is_local() else None
 volume = modal.Volume.from_name("vectorloom-models")
 
 
