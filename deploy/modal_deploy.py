@@ -38,7 +38,7 @@ def vectorloom():
     # in the background and exposes their live progress through /api/models.
     os.environ["VECTOR_AUTO_DOWNLOAD"] = "all"
     os.environ["VECTOR_MODEL"] = "8b"
-    os.environ["VECTOR_OFFICIAL_8B_RUNTIME"] = "1"
+    os.environ["VECTOR_OFFICIAL_RUNTIME"] = "1"
     subprocess.Popen(["/app/vectorloom-local"])
 
 
@@ -64,7 +64,7 @@ def quality_probe():
     print(f"Quality probe {run_id}: results in {result_dir}", flush=True)
     os.environ["VECTOR_AUTO_DOWNLOAD"] = "all"
     os.environ["VECTOR_MODEL"] = "8b"
-    os.environ["VECTOR_OFFICIAL_8B_RUNTIME"] = "1"
+    os.environ["VECTOR_OFFICIAL_RUNTIME"] = "1"
     os.environ["VECTOR_DEBUG_RAW_OUTPUT"] = f"{result_dir}/raw-starvector-output.txt"
     service = subprocess.Popen(["/app/vectorloom-local"])
     try:

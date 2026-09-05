@@ -46,10 +46,15 @@ impl StarVectorRuntime {
         image: &[u8],
     ) -> Result<StarVectorResult> {
         let started = Instant::now();
-        if matches!(kind, ModelKind::EightB)
-            && std::env::var_os("VECTOR_OFFICIAL_8B_RUNTIME").is_some()
+        if std::env::var_os("VECTOR_OFFICIAL_RUNTIME").is_some()
+            || (matches!(kind, ModelKind::EightB)
+                && std::env::var_os("VECTOR_OFFICIAL_8B_RUNTIME").is_some())
         {
-            return generate_with_official_runtime(model_dir, image, started);
+            // Serialize GPU work and release any cached Rust model before
+            // loading the Python model, so requests cannot exhaust VRAM.
+            let mut loaded = self.loaded.lock().expect("StarVector runtime lock");
+            *loaded = None;
+            return generate_with_official_runtime(kind, model_dir, image, started);
         }
         let mut loaded = self.loaded.lock().expect("StarVector runtime lock");
         if loaded.as_ref().map(|value| value.kind) != Some(kind) {
@@ -125,6 +130,7 @@ impl StarVectorRuntime {
 }
 
 fn generate_with_official_runtime(
+    kind: ModelKind,
     model_dir: &Path,
     image: &[u8],
     started: Instant,
@@ -143,11 +149,11 @@ fn generate_with_official_runtime(
             &model_dir.display().to_string(),
         ])
         .output()
-        .context("start official StarVector 8B runtime")?;
+        .context("start official StarVector runtime")?;
     if !process.status.success() {
         let stderr = String::from_utf8_lossy(&process.stderr);
         let diagnostic = stderr.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
-        anyhow::bail!("official StarVector 8B runtime failed: {diagnostic}");
+        anyhow::bail!("official {} runtime failed: {diagnostic}", kind.label());
     }
     let raw = std::fs::read_to_string(output.path()).context("read official StarVector SVG")?;
     if let Ok(path) = std::env::var("VECTOR_DEBUG_RAW_OUTPUT") {
@@ -156,7 +162,7 @@ fn generate_with_official_runtime(
     Ok(StarVectorResult {
         svg: validate_svg(raw, true)?,
         elapsed_ms: started.elapsed().as_millis(),
-        engine: "StarVector 8B · official Transformers CUDA".to_owned(),
+        engine: format!("{} · official Transformers CUDA", kind.label()),
     })
 }
 
