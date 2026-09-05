@@ -22,16 +22,19 @@ volume = modal.Volume.from_name("vectorloom-models")
 
 @app.function(image=image, gpu=["L40S", "A100-80GB", "H100", "RTX-PRO-6000"],
               volumes={"/models": volume}, timeout=1800)
-def run():
+def run(precision: str = "float16"):
+    if precision not in ("float16", "bfloat16"):
+        raise ValueError("Unsupported reference precision")
     directory = Path("/models/probe/runs") / uuid.uuid4().hex
     directory.mkdir(parents=True)
-    manifest = {"state": "running", "started_at": time.time()}
+    manifest = {"state": "running", "started_at": time.time(), "precision": precision}
     def save():
         (directory / "manifest.json").write_text(json.dumps(manifest))
         volume.commit()
     save()
     print(f"Reference probe results: {directory}", flush=True)
-    env = dict(os.environ, VECTOR_DEBUG_RAW_OUTPUT=str(directory / "raw.svg"))
+    env = dict(os.environ, VECTOR_DEBUG_RAW_OUTPUT=str(directory / "raw.svg"),
+               VECTOR_REFERENCE_PRECISION=precision)
     try:
         with (directory / "runtime.log").open("w") as log:
             process = subprocess.run([

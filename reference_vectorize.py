@@ -11,9 +11,13 @@ from transformers import AutoModelForCausalLM
 
 def main(image_path, output_path, model_path):
     started = time.monotonic()
+    precision = os.environ.get("VECTOR_REFERENCE_PRECISION", "float16")
+    if precision not in ("float16", "bfloat16"):
+        raise ValueError("Unsupported reference precision")
+    dtype = getattr(torch, precision)
     hf_hub_download("starvector/starvector-8b-im2svg", "starvector_arch.py", local_dir=model_path)
     model, loading_info = AutoModelForCausalLM.from_pretrained(
-        model_path, torch_dtype=torch.float16, trust_remote_code=True,
+        model_path, torch_dtype=dtype, trust_remote_code=True,
         output_loading_info=True,
     )
     model = model.cuda().eval()
@@ -29,7 +33,7 @@ def main(image_path, output_path, model_path):
     # and a 30-token limit), while the published checkpoint is evaluated with
     # nucleus sampling and the controls below.
     image = model.process_images([Image.open(image_path).convert("RGB")])[0]
-    image = image.to(torch.float16).cuda()
+    image = image.to(dtype).cuda()
     diagnostics.update(image_shape=list(image.shape), image_dtype=str(image.dtype),
                        image_min=image.min().item(), image_max=image.max().item())
     save_diagnostics()
