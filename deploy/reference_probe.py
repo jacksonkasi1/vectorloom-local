@@ -20,7 +20,8 @@ image = (modal.Image.from_id(os.environ["VECTOR_PROBE_IMAGE_ID"])
 volume = modal.Volume.from_name("vectorloom-models")
 
 
-@app.function(image=image, gpu="L40S", volumes={"/models": volume}, timeout=1800)
+@app.function(image=image, gpu=["L40S", "A100-80GB", "H100", "RTX-PRO-6000"],
+              volumes={"/models": volume}, timeout=1800)
 def run():
     directory = Path("/models/probe/runs") / uuid.uuid4().hex
     directory.mkdir(parents=True)
