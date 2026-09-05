@@ -9,6 +9,31 @@ from huggingface_hub import hf_hub_download
 from transformers import AutoModelForCausalLM
 
 
+def use_local_1b_decoder(model_path):
+    """Construct the decoder whose weights are already in the public checkpoint."""
+    from transformers import GPTBigCodeConfig, GPTBigCodeForCausalLM
+    from starvector.model.llm.starcoder import StarCoderModel
+
+    def initialize(self, config, **kwargs):
+        torch.nn.Module.__init__(self)
+        self.init_tokenizer(model_path)
+        self.max_length = config.max_length
+        decoder_config = GPTBigCodeConfig(
+            vocab_size=len(self.tokenizer), n_embd=config.hidden_size,
+            n_layer=config.num_hidden_layers, n_head=config.num_attention_heads,
+            n_positions=config.max_position_embeddings,
+            multi_query=config.multi_query, activation_function="gelu_pytorch_tanh",
+            layer_norm_epsilon=1e-5, use_cache=config.use_cache,
+            eos_token_id=self.tokenizer.eos_token_id,
+            pad_token_id=self.tokenizer.pad_token_id,
+            bos_token_id=self.tokenizer.bos_token_id,
+        )
+        self.transformer = GPTBigCodeForCausalLM(decoder_config)
+        self.prompt = "<svg"
+
+    StarCoderModel.__init__ = initialize
+
+
 def main(image_path, output_path, model_path):
     started = time.monotonic()
     precision = os.environ.get("VECTOR_REFERENCE_PRECISION", "float16")
@@ -20,6 +45,8 @@ def main(image_path, output_path, model_path):
     is_8b = config["starcoder_model_name"] == "bigcode/starcoder2-7b"
     repository = "starvector/starvector-8b-im2svg" if is_8b else "starvector/starvector-1b-im2svg"
     hf_hub_download(repository, "starvector_arch.py", local_dir=model_path)
+    if not is_8b:
+        use_local_1b_decoder(model_path)
     model, loading_info = AutoModelForCausalLM.from_pretrained(
         model_path, torch_dtype=dtype, trust_remote_code=True,
         output_loading_info=True,
